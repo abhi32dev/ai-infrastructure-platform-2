@@ -48,7 +48,7 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done
   embedding/LLM-call pipeline
   Stack: Docker Redis (queue), Python worker pool, LocalStack SQS optional
 
-- [ ] **07 — A/B testing & p-value significance harness** (`07-ab-testing-harness/`)
+- [x] **07 — A/B testing & p-value significance harness** (`07-ab-testing-harness/`) — has its own `.venv/`. Measured: synthetic recommender A/B recovers 7.4%-scale lift at p=0.00002 (n=50K/arm); live latency A/B correctly finds a 56%-looking lift NOT significant at n=8.
   Maps to: "Statistically Validated Rollouts", "A/B testing & p-value
   significance testing" (both Comcast and Smith Micro bullets)
   Stack: Python, scipy.stats, applied to LLM/prompt output quality metrics
