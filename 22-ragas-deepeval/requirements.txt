@@ -1,0 +1,17 @@
+# Pinned to a working combination — see README for the real dependency
+# resolution rabbit hole this took to find. ragas==0.4.x and the latest
+# langchain-community both broke on import (ragas.llms.base imports
+# ChatVertexAI from a langchain_community submodule newer
+# langchain-community releases removed). This exact combination is
+# verified to import and run cleanly.
+ragas==0.2.15
+deepeval==4.1.8
+langchain==0.3.7
+langchain-community==0.3.7
+langchain-core==0.3.86
+langchain-ollama==0.2.3
+langchain-chroma==0.1.4
+langchain-text-splitters==0.3.5
+langchain-openai==0.2.14
+chromadb==0.5.23
+pytest

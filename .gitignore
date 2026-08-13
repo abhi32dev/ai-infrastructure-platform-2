@@ -30,5 +30,11 @@ idempotency_store.json
 20-terraform-iac/terraform/*.tfstate
 20-terraform-iac/terraform/*.tfstate.backup
 21-feature-store/feature_repo/data/
+22-ragas-deepeval/chroma_db/
+23-tensorflow-keras/data/
+23-tensorflow-keras/*.keras
+23-tensorflow-keras/*.tflite
+24-gpu-finops/*.sqlite
+24-gpu-finops/*.html
 *.log
 node_modules/

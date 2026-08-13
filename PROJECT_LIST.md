@@ -92,21 +92,21 @@ Sources are cited in the session this analysis came from.
   Stack: Feast, backed by local Postgres/Redis (reusing project 06's
   Redis).
 
-- [ ] **22 — Named LLM eval tools (Ragas / DeepEval)** (`22-ragas-deepeval/`)
+- [x] **22 — Named LLM eval tools (Ragas / DeepEval)** (`22-ragas-deepeval/`) — has its own `.venv/`. Found+fixed a real cross-package dependency break (pinned exact working versions). Found: Ragas needs low concurrency w/ local judge (NaN→1.0 fix); DeepEval crashes loud vs Ragas' silent NaN on the same root cause; llama3.2:1b JSON reliability is intermittent, not deterministic.
   Gap: projects 02/03 built a from-scratch evaluation gate (strong
   engineering signal) but don't demonstrate fluency with the specific
   named tools interviewers ask about.
   Stack: wraps project 01's RAG pipeline with both Ragas and DeepEval,
   compared side by side.
 
-- [ ] **23 — TensorFlow / Keras project** (`23-tensorflow-keras/`)
+- [x] **23 — TensorFlow / Keras project** (`23-tensorflow-keras/`) — has its own `.venv/`. Found+fixed 2 real Keras API-compatibility snags. Measured: 92.5% MNIST accuracy, TFLite export 67.9% smaller with 100% prediction agreement vs Keras.
   Gap: the user's own question — confirmed real gap. ~33% of postings
   still name TensorFlow; dominant for edge/enterprise/mobile deployment.
   Stack: a Keras model (likely a lightweight image classifier or the
   project-08-style recommender re-implemented in Keras) to show
   cross-framework fluency, not just PyTorch.
 
-- [ ] **24 — GPU cost governance / FinOps dashboard** (`24-gpu-finops/`)
+- [x] **24 — GPU cost governance / FinOps dashboard** (`24-gpu-finops/`) — has its own `.venv/`. Honest: simulated telemetry, real tested cost-governance engine. Verified: idle detection correctly flagged exactly the one deliberately-idle instance (59.7% idle, $10.96 wasted), correctly left the 3 busy instances at 0%.
   Gap: "tracking GPU utilization... strict cost controls" named as a
   core 2026 responsibility, distinct from project 14's LLM-token cost
   focus.
