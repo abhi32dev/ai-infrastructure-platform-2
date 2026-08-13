@@ -47,7 +47,7 @@ Sources are cited in the session this analysis came from.
   with the `nccl` backend, only the backend name and device placement
   change at real scale.
 
-- [ ] **16 — Kubernetes for ML workloads** (`16-kubernetes-ml/`)
+- [x] **16 — Kubernetes for ML workloads** (`16-kubernetes-ml/`) — has its own `.venv/` + real `kind` cluster. Found + fixed a real bug (health always returned 200, invisible to K8s probes); found + documented a second real limitation (HALF_OPEN reads healthy without active re-check). Verified live: pod removed from Service endpoints on real Ollama outage.
   Gap: single most-repeated keyword across every posting searched
   ("Kubernetes internals," "GPU scheduling," named at NVIDIA/Tesla/
   Perplexity/Scale AI).
