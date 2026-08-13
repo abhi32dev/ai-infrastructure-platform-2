@@ -12,13 +12,13 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done
 
 ## Build order & status
 
-- [x] **01 — RAG-from-scratch pipeline** (`01-rag-pipeline/`)
+- [x] **01 — RAG-from-scratch pipeline** (`01-rag-pipeline/`) — has its own `.venv/`
   Maps to: "Applied RAG & Vector Retrieval (Self-Directed)", "7 retrieval
   stages — ingestion, chunking, embedding, vector indexing, retrieval,
   context assembly, LLM response generation"
   Stack: Python, LangChain, Chroma (local vector DB), Ollama (local LLM)
 
-- [ ] **02 — Multi-model evaluation gate (LLM-as-judge)** (`02-llm-eval-gate/`)
+- [x] **02 — Multi-model evaluation gate (LLM-as-judge)** (`02-llm-eval-gate/`) — has its own `.venv/`
   Maps to: "Multi-Model Evaluation Gate", "Multi-Model AI Output Evaluation",
   CONDOR's "route each AI-generated decision through a second independent
   model before it acts"
@@ -96,10 +96,17 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done
 ---
 
 ## Repo conventions
-- Each numbered folder is a **self-contained** project: own `README.md`,
-  `requirements.txt`, source, tests, and a short "what this demonstrates /
-  what to say in an interview" section.
+- Each numbered folder is a **fully isolated, self-contained** project: its
+  own `.venv/` (never shared across projects), own `requirements.txt`,
+  source, tests, and a short "what this demonstrates / what to say in an
+  interview" section. Working on/rebuilding one project's venv never
+  touches or breaks another project's venv or dependencies.
+- To run any project: `cd NN-project-name && source .venv/bin/activate`
+  (first time: `python3 -m venv .venv && pip install -r requirements.txt`).
 - No secrets committed. `.env.example` only.
 - Everything runs on a laptop. No paid cloud resources required.
+- Shared local infra (Ollama models) lives outside any single project's
+  venv (`ollama pull <model>` is global, not per-project) — each project's
+  README lists which Ollama models it needs.
 - Local git now; GitHub remote to be added once user provides GitHub ID —
   will push each project as it's completed so local and GitHub stay in sync.
