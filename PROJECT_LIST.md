@@ -59,7 +59,7 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done
   Stack: Python, implicit/collaborative filtering, MovieLens dataset,
   offline holdout eval
 
-- [ ] **09 — Local model serving harness** (`09-local-model-serving/`)
+- [x] **09 — Local model serving harness** (`09-local-model-serving/`) — has its own `.venv/`. Circuit breaker verified: opens after 3 failures, fast-fails in 0.001s (vs 30s timeout), recovers via HALF_OPEN after cooldown.
   Maps to: "Ollama (local model serving/prototyping)", "prototypes changes
   locally with Ollama before promotion"
   Stack: Ollama, FastAPI wrapper, health checks (mirrors CONDOR's
