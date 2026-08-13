@@ -167,7 +167,7 @@
     letter-spacing: -0.01em;
     margin: 0 0 20px;
     text-wrap: balance;
-    max-width: 15ch;
+    max-width: 20ch;
   }
 
   h1 .accent-word { color: var(--accent); }
@@ -425,9 +425,9 @@
   <div class="statusbar">
     <div class="statusbar-inner">
       <span class="dot"></span>
-      <span><b>PORTFOLIO STATUS</b> · 14/14 SERVICES ONLINE</span>
+      <span><b>PORTFOLIO STATUS</b> · 24/24 SERVICES ONLINE</span>
       <span class="sep">/</span>
-      <span>131 TESTS PASSING</span>
+      <span>175 TESTS PASSING</span>
       <span class="sep">/</span>
       <span>0 CLOUD $ SPENT</span>
     </div>
@@ -436,21 +436,22 @@
   <div class="wrap">
     <section class="hero">
       <div class="eyebrow">abhi32dev / ai-infrastructure-platform-2</div>
-      <h1>Fourteen systems.<br>Zero <span class="accent-word">slideware</span>.</h1>
+      <h1>Twenty-four systems.<br>Zero <span class="accent-word">slideware</span>.</h1>
       <p class="hero-sub">
         A hands-on AI/ML infrastructure portfolio — RAG pipelines, multi-model
         evaluation gates, MLOps regression gating, agent runtimes, distributed
-        backpressure, statistical experimentation, and more. Every card below
-        links to a real, tested, runnable project with <b>measured results
-        from an actual run</b>, not a projected number.
+        training, Kubernetes, LLM inference serving, fine-tuning, and more.
+        Every card below links to a real, tested, runnable project with
+        <b>measured results from an actual run</b>, not a projected number —
+        including the bugs found and fixed along the way.
       </p>
       <div class="hero-stats">
         <div class="hero-stat">
-          <div class="num">14 / 14</div>
+          <div class="num">24 / 24</div>
           <div class="label">Projects shipped</div>
         </div>
         <div class="hero-stat">
-          <div class="num">131</div>
+          <div class="num">175</div>
           <div class="label">Tests, all passing</div>
         </div>
         <div class="hero-stat">
@@ -529,6 +530,36 @@ pytest -q</div>
     { id: "14", slug: "14-cost-optimization", name: "Semantic Cache & Cost Dashboard",
       desc: "Embedding-similarity response cache with a real threshold-calibration story, plus an HTML spend dashboard.",
       metricVal: "27%", metricDesc: "cost saved, calibrated similarity cache" },
+    { id: "15", slug: "15-distributed-training", name: "Distributed Training (DDP)",
+      desc: "Real torch.distributed across 4 local processes — proves the actual gradient all-reduce protocol, gloo backend.",
+      metricVal: "0.0 vs 0.365", metricDesc: "L2 weight distance: DDP-synced vs. no-sync control" },
+    { id: "16", slug: "16-kubernetes-ml", name: "Kubernetes for ML Workloads",
+      desc: "Real kind cluster: Deployment/Service/HPA with readiness probes wired to a circuit breaker's health endpoint.",
+      metricVal: "2 bugs", metricDesc: "found + fixed/documented via real outage injection" },
+    { id: "17", slug: "17-inference-serving", name: "High-Perf Inference Serving",
+      desc: "vLLM confirmed infeasible on this hardware (tested, not assumed) → llama.cpp continuous batching instead.",
+      metricVal: "2.09–2.27x", metricDesc: "throughput speedup from continuous batching" },
+    { id: "18", slug: "18-lora-finetuning", name: "QLoRA Fine-Tuning",
+      desc: "Real 4-bit quantization verified on Apple Silicon, correcting a “CUDA-only” assumption from the research.",
+      metricVal: "0.242%", metricDesc: "trainable params; 591KB adapter vs. 320MB+ base" },
+    { id: "19", slug: "19-quantization-onnx", name: "Quantization & ONNX Export",
+      desc: "Real MNIST CNN → ONNX → INT8. A counter-intuitive, reproduced finding: INT8 was slower here, not faster.",
+      metricVal: "−72.3%", metricDesc: "file size, with a real latency-regression finding" },
+    { id: "20", slug: "20-terraform-iac", name: "Terraform IaC",
+      desc: "S3 / DynamoDB / SQS+DLQ against LocalStack — a second IaC tool, verified with real write/read round-trips.",
+      metricVal: "3 / 3", metricDesc: "resources verified genuinely usable, not just created" },
+    { id: "21", slug: "21-feature-store", name: "Feature Store (Feast)",
+      desc: "Proves point-in-time correctness with data built so “latest value” and “value as of X” provably differ.",
+      metricVal: "3.0 → 4.2", metricDesc: "same feature, correct answer differs by query mode" },
+    { id: "22", slug: "22-ragas-deepeval", name: "Ragas & DeepEval",
+      desc: "Named eval-tool fluency on top of project 01's RAG pipeline — a real multi-hour dependency break, pinned and fixed.",
+      metricVal: "2 modes", metricDesc: "silent-NaN vs. loud-crash failure, same root cause" },
+    { id: "23", slug: "23-tensorflow-keras", name: "TensorFlow / Keras",
+      desc: "Direct framework comparison against project 19's PyTorch CNN, with TFLite — TF's real edge/mobile differentiator.",
+      metricVal: "100%", metricDesc: "Keras vs. TFLite prediction agreement, 67.9% smaller" },
+    { id: "24", slug: "24-gpu-finops", name: "GPU Cost Governance",
+      desc: "Honest: simulated telemetry, real tested cost engine — sustained-idle detection, per-team allocation, alerting.",
+      metricVal: "$10.96", metricDesc: "wasted spend correctly isolated to 1 of 4 instances" },
   ];
 
   const grid = document.getElementById("cardgrid");
