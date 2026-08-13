@@ -1,0 +1,7 @@
+langchain-ollama
+langchain-core
+langchain-chroma
+langchain-text-splitters
+chromadb
+tiktoken
+pytest

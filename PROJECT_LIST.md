@@ -29,7 +29,7 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done
   Changes" (GitHub Actions blocking regressions)
   Stack: MLflow (local tracking server), GitHub Actions, pytest
 
-- [ ] **04 — Cost-aware retrieval & model router** (`04-cost-aware-router/`)
+- [x] **04 — Cost-aware retrieval & model router** (`04-cost-aware-router/`) — has its own `.venv/`. Measured: 39.7% cost savings from routing, chunk_size=1000/k=4 best hit-rate-per-token.
   Maps to: "Cost-Aware Retrieval & Model Routing (Self-Directed)" — tuned
   chunk size/context length/retrieval count, routed simple queries to a
   smaller model
