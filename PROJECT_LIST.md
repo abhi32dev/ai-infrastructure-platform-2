@@ -92,7 +92,7 @@ not explicitly named on the resume, but expected knowledge at Staff level)
   Stack: Python, regex/presidio-style PII patterns, pydantic schema
   validation, a small adversarial-prompt eval set
 
-- [ ] **13 — Observability for AI systems** (`13-observability/`)
+- [x] **13 — Observability for AI systems** (`13-observability/`) — has its own `.venv/` + docker-compose (Prometheus+Grafana). Verified: Prometheus target "up", real query counts scraped, provisioned Grafana dashboard, correct span parent/child linkage.
   What: OpenTelemetry tracing across a full RAG/agent request (retrieval
   span, generation span, tool-call spans), Prometheus metrics (request
   latency, token counts, error rate, judge agreement rate pulled from

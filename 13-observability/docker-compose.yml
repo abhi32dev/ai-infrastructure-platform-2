@@ -1,0 +1,23 @@
+services:
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: aegis-obs-prometheus
+    ports:
+      - "9091:9090"   # non-default host port to avoid colliding with any other local Prometheus
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"  # needed on Linux; no-op on macOS Docker Desktop
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: aegis-obs-grafana
+    ports:
+      - "3001:3000"   # non-default host port
+    environment:
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+    depends_on:
+      - prometheus
