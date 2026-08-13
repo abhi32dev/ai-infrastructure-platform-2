@@ -55,7 +55,7 @@ Sources are cited in the session this analysis came from.
   project 09's serving harness as a real Deployment + Service + HPA +
   liveness/readiness probes wired to its existing `/health` endpoint.
 
-- [ ] **17 — High-performance LLM inference serving** (`17-inference-serving/`)
+- [x] **17 — High-performance LLM inference serving** (`17-inference-serving/`) — has its own `.venv/`. vLLM confirmed infeasible on Apple Silicon (documented honestly), substituted llama.cpp's llama-server. Measured: 2.09x-2.27x continuous-batching throughput speedup across clean runs; found+fixed a real test-methodology flakiness bug.
   Gap: "2026 primary focus is on inference: latency-per-token, throughput,
   p99 latency" — vLLM/TensorRT-LLM/SGLang/Triton named directly.
   Feasibility to verify: vLLM targets NVIDIA CUDA primarily; Apple

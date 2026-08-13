@@ -22,5 +22,6 @@ idempotency_store.json
 14-cost-optimization/dashboard.html
 02-llm-eval-gate/logs/audit.jsonl
 15-distributed-training/checkpoints/
+17-inference-serving/models/*.gguf
 *.log
 node_modules/
