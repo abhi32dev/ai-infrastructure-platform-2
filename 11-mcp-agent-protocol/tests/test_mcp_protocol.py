@@ -82,3 +82,40 @@ async def test_coordinator_delegation_produces_full_remediation_trace():
     assert "incident history" in text
     assert "re-check" in text
     assert text.strip().endswith("status=healthy az=us-west-2b")
+
+
+# --- Negative / edge cases ---
+
+@pytest.mark.asyncio
+async def test_search_incident_log_no_match_returns_explicit_no_results():
+    params = StdioServerParameters(command="python", args=[str(SPECIALIST_SCRIPT)])
+    async with stdio_client(params) as (read, write):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            result = await session.call_tool("search_incident_log", {"keyword": "nonexistent-keyword-xyz"})
+    assert "no incidents found" in result.content[0].text
+
+
+@pytest.mark.asyncio
+async def test_restart_unknown_instance_is_rejected_not_silently_ignored():
+    params = StdioServerParameters(command="python", args=[str(SPECIALIST_SCRIPT)])
+    async with stdio_client(params) as (read, write):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            result = await session.call_tool("restart_instance", {"instance_id": "i-does-not-exist"})
+    assert "cannot restart unknown instance" in result.content[0].text
+
+
+@pytest.mark.asyncio
+async def test_coordinator_skips_remediation_for_already_healthy_instance():
+    """Regression guard on the coordinator's branch logic: a healthy
+    instance (i-001) must short-circuit to 'no remediation needed'
+    without calling restart/search_incident_log at all."""
+    params = StdioServerParameters(command="python", args=[str(COORDINATOR_SCRIPT)])
+    async with stdio_client(params) as (read, write):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            result = await session.call_tool("diagnose_and_remediate_fleet", {"instance_id": "i-001"})
+    text = result.content[0].text
+    assert "already healthy, no remediation needed" in text
+    assert "restart" not in text

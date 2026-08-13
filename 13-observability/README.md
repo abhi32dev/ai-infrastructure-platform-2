@@ -84,11 +84,10 @@ curl -X POST localhost:8000/query -H 'content-type: application/json' \
 ```bash
 cd 13-observability && source .venv/bin/activate && pytest -q
 ```
-5 live tests (real pipeline, real metric registry reads): retrieval
-relevance, context assembly correctness, end-to-end traced query
-correctness, and two tests confirming Prometheus counters/histograms
-actually increment on real requests (reading the client library's
-in-memory values directly rather than parsing `/metrics` text).
+8 live tests (real pipeline, real metric registry reads), in three categories:
+- **Positive path (5):** retrieval relevance, context assembly correctness, end-to-end traced query correctness, and two tests confirming Prometheus counters/histograms actually increment on real requests (reading the client library's in-memory values directly rather than parsing `/metrics` text)
+- **Negative / edge cases (2):** a query with zero keyword overlap against the corpus still returns a fallback chunk instead of crashing; `assemble_context([])` returns an empty string rather than raising
+- **Regression guard (1):** forcing a real exception during generation proves the `outcome="error"` metric actually increments — verified by triggering the failure, not just trusting the try/except wiring by inspection
 
 ## What to say in an interview
 

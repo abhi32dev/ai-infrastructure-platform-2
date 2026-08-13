@@ -73,10 +73,10 @@ port (no mocking):
 ```bash
 cd 09-local-model-serving && source .venv/bin/activate && pytest -q
 ```
-6 tests: 5 deterministic circuit-breaker state-machine tests (no HTTP) +
-1 live integration test proving the FastAPI app enforces the breaker
-end-to-end against a real closed port, with a hard assertion that the
-open-circuit rejection takes under 1 second.
+10 tests, in three categories:
+- **Positive/negative state machine (5):** starts CLOSED, opens after threshold failures, success resets and closes, transitions to HALF_OPEN after cooldown, HALF_OPEN failure reopens the circuit
+- **Boundary/edge cases (3):** a HALF_OPEN success fully resets the consecutive-failure counter (not just the state label) — a single subsequent failure must NOT immediately reopen it; a fresh breaker reports zero failures; a malformed request body (missing `prompt`) returns `422`, not a `500`
+- **Live integration (2):** `/health` reports healthy before any requests; the FastAPI app enforces the breaker end-to-end against a real closed port, with a hard assertion the open-circuit rejection takes under 1 second (vs. a 30s timeout otherwise)
 
 ## What to say in an interview
 

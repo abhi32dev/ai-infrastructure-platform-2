@@ -64,9 +64,11 @@ Runs four scenarios back to back:
 ```bash
 cd 05-agent-runtime && source .venv/bin/activate && pytest -q
 ```
-5 tests, all deterministic and fast (in-memory SQLite, no LLM calls):
-safe-action execution, interrupt+reject, interrupt+approve, idempotent
-no-rerun, and bounded-retry give-up-after-max-attempts.
+8 tests, all deterministic and fast (in-memory or tmp-file SQLite, no LLM
+calls), in three categories:
+- **Positive path (4):** safe-action execution, interrupt+reject, interrupt+approve, idempotent no-rerun
+- **Negative / edge cases (3):** a DIFFERENT idempotency key does NOT hit the cache (proves the dedup marker is keyed correctly, not just "seen this action type before"); bounded retry gives up after exhausting max attempts; retry succeeds exactly AT the max-attempts boundary (not treated as exhausted just because it equals the max)
+- **Regression guard (1):** a genuinely new `SqliteSaver` connection to the same on-disk file (not `:memory:`) can resume a paused graph — proves "survives a process restart" is real, not just an in-memory illusion
 
 ## What to say in an interview
 

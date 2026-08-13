@@ -110,11 +110,13 @@ distinct from a real object that's merely occluded for a few frames
 ```bash
 cd 10-deep-learning-demo && source .venv/bin/activate && pytest -q
 ```
-8 tests: 3 fast dataset/model construction tests (no training needed),
-5 tracker tests (persistent ID across frames, new-object ID assignment,
-track pruning after max missed frames, spurious-detection isolation,
-non-overlapping detections don't false-match). The full training run
-(~13 min) is exercised via `train.py` directly, not inside pytest.
+11 tests, in three categories:
+- **Positive path (6):** dataset loads expected image count, dataset items have matching boxes/labels, model builds with correct output classes; tracker: persistent ID across frames, new-object ID assignment, non-overlapping detections don't false-match
+- **Negative / edge cases (4):** track pruning after max missed frames, spurious one-frame detection stays isolated (history length 1), an empty first frame doesn't crash the tracker, two detections both overlapping one track never both claim it (greedy-matching regression guard)
+- **Regression guard (1):** a briefly-occluded object (missing for fewer than `max_missed` frames) is re-matched to its EXISTING track ID on reappearance, not assigned a new one — the actual point of tolerating missed frames at all
+
+The full training run (~13 min) is exercised via `train.py` directly, not
+inside pytest, since a full fine-tuning pass is too slow for a test suite.
 
 ## What to say in an interview
 

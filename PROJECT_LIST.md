@@ -8,6 +8,26 @@ interview deep-dives. No cloud cost required — everything runs local
 
 Legend: `[ ]` not started · `[~]` in progress · `[x]` done
 
+## Status: all 14 projects complete, tested, documented
+
+**131 tests total across all 14 projects, all passing.** Every project's
+test suite is explicitly split into three categories — check each
+project's README "Tests" section for the exact breakdown:
+- **Positive path** — the feature works as intended under normal input
+- **Negative / edge cases** — empty input, malformed input, boundary
+  values, unknown/missing IDs, zero-division-prone arithmetic — proven
+  not to crash or silently misbehave
+- **Regression guards** — a specific past bug, calibration finding, or
+  subtle correctness property (determinism, off-by-one boundaries,
+  symmetry, fail-safe direction) pinned down so a future change can't
+  silently reintroduce it
+
+Every project folder contains a `README.md` covering: what it demonstrates
+and which resume claim it maps to, exact setup/run commands, measured
+results from a real run (not hypothetical numbers), the full test
+breakdown above, and a "what to say in an interview" section for each
+non-obvious design decision.
+
 ---
 
 ## Build order & status

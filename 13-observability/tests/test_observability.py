@@ -47,3 +47,39 @@ def test_request_latency_histogram_records_observation():
     run_traced_query("When should rollback trigger?")
     after_count = REQUEST_LATENCY._sum.get()
     assert after_count > before_count
+
+
+# --- Negative / edge cases ---
+
+def test_retrieve_with_no_keyword_overlap_falls_back_gracefully():
+    """Negative case: a query sharing zero words with any corpus entry
+    must not return an empty result — the fallback returns the
+    highest-scoring (even if score=0) entry rather than crashing or
+    silently returning nothing to assemble_context."""
+    chunks = retrieve("xyzzy plugh qwerty nonsense words")
+    assert len(chunks) >= 1
+
+
+def test_assemble_context_with_empty_chunk_list_returns_empty_string():
+    context = assemble_context([])
+    assert context == ""
+
+
+def test_metrics_increment_on_error_outcome():
+    """Regression guard: the error path (REQUESTS_TOTAL.labels(outcome=
+    'error')) must actually increment when generation raises — proven by
+    forcing a real exception, not just trusting the try/except wiring by
+    inspection."""
+    from unittest.mock import patch
+    import traced_pipeline
+
+    before = REQUESTS_TOTAL.labels(outcome="error")._value.get()
+
+    with patch("traced_pipeline.generate", side_effect=RuntimeError("simulated downstream failure")):
+        try:
+            traced_pipeline.run_traced_query("this will fail during generation")
+        except RuntimeError:
+            pass
+
+    after = REQUESTS_TOTAL.labels(outcome="error")._value.get()
+    assert after == before + 1

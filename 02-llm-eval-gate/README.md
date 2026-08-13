@@ -45,10 +45,11 @@ the resume's MLflow version-tracking bullet; project 03 adds MLflow proper).
 cd 02-llm-eval-gate && source .venv/bin/activate && pytest -q
 ```
 
-4 tests: 3 deterministic unit tests of the AND-gate logic (mocked models,
-no Ollama dependency, no flakiness) + 1 live integration test against the
-real models on the one scenario that's consistently unambiguous
-(destructive action with no backup → both models reliably reject).
+8 tests, in four categories:
+- **Positive/negative gate logic (4):** judge-rejects-blocks, generator-rejects-blocks, both-approve-executes, both-reject-blocks — all deterministic, mocked models, no flakiness
+- **Fail-safe on malformed output (2):** generator returns unparsable JSON → fails safe to REJECT; judge returns unparsable JSON → fails safe to REJECT (two independent code paths, tested separately)
+- **Regression guard (1):** every gate decision is appended to the audit log exactly once, with the correct scenario ID
+- **Live integration (1):** against the real local models, the one scenario that's consistently unambiguous (destructive action with no backup → both models reliably reject)
 
 ## Results on the fixed evaluation set (6 scenarios)
 

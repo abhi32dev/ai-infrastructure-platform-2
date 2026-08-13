@@ -50,3 +50,36 @@ def test_non_overlapping_detection_does_not_match_existing_track():
     # a box far away should NOT be matched to the existing track
     alive = tracker.step([[500, 500, 540, 540]])
     assert len(alive) == 2  # original track (now missed) + new track
+
+
+# --- Negative / edge cases ---
+
+def test_empty_first_frame_does_not_crash():
+    tracker = IoUTracker()
+    alive = tracker.step([])
+    assert alive == {}
+
+
+def test_track_recovers_identity_after_brief_occlusion():
+    """Positive counterpart to test_track_dropped_after_max_missed_frames:
+    an object that's briefly missing (within max_missed) but reappears
+    should be re-matched to its EXISTING track, not assigned a new ID —
+    that's the actual point of tolerating missed frames at all."""
+    tracker = IoUTracker(max_missed=3)
+    tracker.step([[10, 10, 50, 50]])           # frame 0: track 1 created
+    tracker.step([])                            # frame 1: occluded, missed=1
+    tracker.step([])                            # frame 2: occluded, missed=2
+    alive = tracker.step([[13, 10, 53, 50]])    # frame 3: reappears, close to last known box
+    assert list(alive.keys()) == [1]            # same track ID, not a new one
+
+
+def test_two_detections_do_not_both_match_the_same_track():
+    """Regression guard on the greedy matching: if two new detections
+    both overlap one existing track, only ONE should claim it — the other
+    must start a new track, never both updating (and silently
+    overwriting) the same track object."""
+    tracker = IoUTracker(iou_threshold=0.1)
+    tracker.step([[10, 10, 50, 50]])
+    # two detections, both overlapping the existing track region
+    alive = tracker.step([[12, 10, 52, 50], [14, 10, 54, 50]])
+    assert len(alive) == 2  # one matched the existing track, one started a new track

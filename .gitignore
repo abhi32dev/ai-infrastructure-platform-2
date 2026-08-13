@@ -20,5 +20,6 @@ idempotency_store.json
 !10-deep-learning-demo/outputs/.gitkeep
 14-cost-optimization/cost_ledger.sqlite
 14-cost-optimization/dashboard.html
+02-llm-eval-gate/logs/audit.jsonl
 *.log
 node_modules/

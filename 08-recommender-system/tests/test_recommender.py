@@ -69,6 +69,45 @@ def test_popularity_baseline_ranks_by_mean_rating_with_count_floor():
     assert 200 in baseline.ranked_items
 
 
+# --- Negative / edge cases ---
+
+def test_recommend_top_k_larger_than_item_count_returns_all_available():
+    df = tiny_dataset()
+    model = MatrixFactorizationRecommender(n_users=5, n_items=5, n_factors=3)
+    model.fit(df, epochs=5, verbose=False)
+    recs = model.recommend_top_k(user_id=1, k=100, exclude_items=set())
+    assert len(recs) <= 5  # can't recommend more items than exist
+
+
+def test_recommend_top_k_with_all_items_excluded_returns_empty():
+    df = tiny_dataset()
+    model = MatrixFactorizationRecommender(n_users=5, n_items=5, n_factors=3)
+    model.fit(df, epochs=5, verbose=False)
+    recs = model.recommend_top_k(user_id=1, k=5, exclude_items={1, 2, 3, 4, 5})
+    assert recs == []
+
+
+def test_popularity_baseline_with_no_items_meeting_floor_is_empty():
+    """Negative case: if every item has fewer ratings than MIN_RATINGS,
+    the baseline should return an empty ranking, not crash or fall back
+    to including everything."""
+    df = pd.DataFrame([(1, 100, 5), (2, 100, 4)], columns=["user_id", "item_id", "rating"])
+    baseline = PopularityBaseline()
+    baseline.fit(df)
+    assert baseline.ranked_items == []
+    assert baseline.recommend_top_k(user_id=1, k=5, exclude_items=set()) == []
+
+
+def test_untrained_model_predictions_still_within_valid_range():
+    """A model that hasn't been fit yet (global_mean still 0.0, factors
+    still their random init) must still clip to [1, 5] rather than
+    return a nonsensical raw value — guards the clip logic independent
+    of whether training happened."""
+    model = MatrixFactorizationRecommender(n_users=5, n_items=5, n_factors=3)
+    pred = model.predict(1, 1)
+    assert 1.0 <= pred <= 5.0
+
+
 def test_live_mf_model_beats_popularity_baseline_on_real_data():
     from data_loader import load_train, load_test
     from evaluate import precision_recall_at_k, compare_models

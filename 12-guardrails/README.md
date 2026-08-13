@@ -60,10 +60,10 @@ python redteam_eval.py         # full 8-case adversarial suite with pass rate
 ```bash
 cd 12-guardrails && source .venv/bin/activate && pytest -q
 ```
-9 tests: 8 deterministic (PII detection/redaction, injection detection
-with both true-positive and false-positive checks, output-leak detection,
-rate-limiter capacity enforcement) + 1 live test running the full
-red-team suite against the real pipeline and asserting 100% pass rate.
+16 tests, in three categories:
+- **Positive/negative detection (8):** PII detection finds email/phone, redaction removes matched text, clean text has no findings, injection detector catches known patterns AND does not false-positive on benign text, output guardrail flags a real leak AND passes when there's no leak, rate limiter blocks after capacity is exhausted
+- **Negative / edge cases (7):** empty-string input produces zero findings for both detectors; clean text passes through redaction completely unchanged; multiple PII categories in one text are ALL redacted (not just the first match); an unrelated PII category appearing in the output is NOT falsely flagged as a leak of a DIFFERENT redacted category; the rate limiter actually refills over time (not just "exhausts and stays exhausted" — the missing positive half of that test); the rate limiter isolates different users from each other; the injection detector is case-insensitive (a common evasion attempt)
+- **Live integration (1):** the full 8-case red-team suite against the real pipeline, asserting 100% pass rate
 
 ## What to say in an interview
 

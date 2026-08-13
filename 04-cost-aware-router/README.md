@@ -73,9 +73,11 @@ per query for zero quality gain, a pure cost regression worth catching.
 ```bash
 cd 04-cost-aware-router && source .venv/bin/activate && pytest -q
 ```
-5 tests: 3 deterministic (mocked classifier — routing logic and fail-safe
-behavior), 2 live integration tests proving routing actually reduces cost
-and larger chunks actually improve hit rate on this corpus.
+9 tests, in three categories:
+- **Positive/negative routing logic (3):** SIMPLE routes to the small model, COMPLEX routes to the large model, unparsable classification fails safe to COMPLEX
+- **Negative / edge cases (3):** an unexpected-but-valid tier value ("MODERATE") also fails safe to COMPLEX (distinct code path from unparsable JSON), zero-token cost is exactly zero for both models, empty-string token count is zero
+- **Regression guard (1):** the large model's per-token rate must always exceed the small model's — catches a config-file typo that would silently break the entire routing cost story
+- **Live integration (2):** routing actually reduces total cost vs. always-large, larger chunks actually improve hit rate on this corpus
 
 ## What to say in an interview
 

@@ -72,11 +72,10 @@ a from-scratch implementation, not a suspiciously perfect one.
 ```bash
 cd 08-recommender-system && source .venv/bin/activate && pytest -q
 ```
-5 tests: 4 fast/deterministic (training reduces error on synthetic data,
-predictions stay in [1,5], recommendations exclude already-seen items,
-popularity baseline respects its minimum-ratings floor) + 1 slower live
-test training on the real MovieLens data and confirming MF beats the
-baseline.
+9 tests, in three categories:
+- **Positive path (4):** training reduces error on synthetic data, predictions stay in [1,5], recommendations exclude already-seen items, popularity baseline respects its minimum-ratings floor
+- **Negative / edge cases (4):** requesting more recommendations than items exist returns only what's available (not padded or duplicated); excluding every item returns an empty list, not an error; a baseline where NO item meets the minimum-ratings floor returns an empty ranking rather than falling back to including everything; an untrained model (random init, global_mean still 0.0) still clips predictions to [1,5]
+- **Live integration (1):** training on the real MovieLens data and confirming MF beats the popularity baseline
 
 ## What to say in an interview
 

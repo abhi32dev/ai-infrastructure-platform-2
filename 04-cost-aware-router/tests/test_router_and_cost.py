@@ -48,3 +48,35 @@ def test_live_chunk_sweep_shows_quality_improves_with_larger_chunks():
     small_chunk_hit_rate = max(r["hit_rate"] for r in results if r["chunk_size"] == 200)
     large_chunk_hit_rate = max(r["hit_rate"] for r in results if r["chunk_size"] == 1000)
     assert large_chunk_hit_rate >= small_chunk_hit_rate
+
+
+# --- Negative / edge cases ---
+
+def test_unexpected_tier_value_fails_safe_to_complex():
+    """Distinct failure mode from unparsable JSON: the JSON is valid but
+    the 'tier' value isn't one of the two expected strings (e.g. a model
+    hallucinating a third category) — must still fail safe to COMPLEX."""
+    with patch("router.ChatOllama") as mock_chat:
+        mock_chat.return_value.invoke.return_value.content = '{"tier": "MODERATE"}'
+        tier = router.classify("anything")
+    assert tier == "COMPLEX"
+
+
+def test_cost_of_zero_tokens_is_zero_cost():
+    from cost_report import cost_of
+    assert cost_of(SMALL_MODEL, 0) == 0.0
+    assert cost_of(LARGE_MODEL, 0) == 0.0
+
+
+def test_count_tokens_empty_string_is_zero():
+    from cost_report import count_tokens
+    assert count_tokens("") == 0
+
+
+def test_large_model_always_costs_more_per_token_than_small_model():
+    """Regression guard on the rate card itself — if someone edits
+    config.py and accidentally makes the 'large' model cheaper than the
+    'small' one, the whole routing cost story stops making sense."""
+    from cost_report import cost_of
+    tokens = 1000
+    assert cost_of(LARGE_MODEL, tokens) > cost_of(SMALL_MODEL, tokens)

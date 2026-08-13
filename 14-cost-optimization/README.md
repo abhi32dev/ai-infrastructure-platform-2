@@ -78,11 +78,10 @@ exactly the calibrated behavior above.
 ```bash
 cd 14-cost-optimization && source .venv/bin/activate && pytest -q
 ```
-5 tests: cosine-similarity math (identical/orthogonal vectors), ledger
-summary arithmetic (hit rate, savings) including the empty-ledger edge
-case (no division-by-zero), and one live test proving the real embedding
-model hits on a close paraphrase and correctly misses on an unrelated
-query at the calibrated threshold.
+9 tests, in three categories:
+- **Positive path (3):** cosine-similarity math (identical vectors → 1.0), ledger summary arithmetic (hit rate, savings), a live test proving the real embedding model hits on a close paraphrase and correctly misses on an unrelated query at the calibrated threshold
+- **Negative / edge cases (4):** an empty ledger's summary has no division-by-zero; an empty cache's lookup returns `None` rather than crashing; an all-cache-hit ledger correctly reports 100% savings; opposite vectors give cosine similarity of exactly -1.0
+- **Regression guard (1):** the originally-guessed `0.92` threshold must NOT hit on the same close paraphrase that hits at the recalibrated `0.75` — protects the calibration finding itself; if someone reverts the threshold without re-measuring, this test fails and points at why
 
 ## What to say in an interview
 

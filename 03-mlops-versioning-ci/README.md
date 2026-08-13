@@ -76,9 +76,10 @@ real GitHub runner yet since there's no remote configured.
 ```bash
 cd 03-mlops-versioning-ci && source .venv/bin/activate && pytest -q
 ```
-4 tests: 3 deterministic (mocked) tests of the gate's pass/fail comparison
-logic, 1 live integration test proving `agreement_rate(v2) > agreement_rate(v1)`
-is a real, reproducible measurement.
+7 tests, in three categories:
+- **Positive/negative pass-fail logic (3):** no-baseline-creates-one-and-passes, regression-blocks, equal-or-better-passes
+- **Boundary/edge cases (3):** agreement rate exactly at the tolerance boundary passes (not off-by-one), a tiny 0.01 regression still blocks (tolerance is 0.0, not loose), `--update-baseline` correctly overwrites an existing baseline file
+- **Live integration (1):** proving `agreement_rate(v2) > agreement_rate(v1)` is a real, reproducible measurement against the actual local judge model
 
 ## What to say in an interview
 

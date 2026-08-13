@@ -72,11 +72,11 @@ entirely hidden from the top-level caller.
 ```bash
 cd 11-mcp-agent-protocol && source .venv/bin/activate && pytest -q
 ```
-5 live integration tests (real subprocess-spawned MCP servers, no
-mocking): specialist tool discovery, restart-changes-state, graceful
-handling of an unknown instance ID, proof the coordinator exposes only
-its own tool (not the specialist's), and proof the full delegated
-remediation trace completes end to end.
+8 live integration tests (real subprocess-spawned MCP servers, no
+mocking), in three categories:
+- **Positive path (4):** specialist tool discovery, restart-changes-state, coordinator exposes only its own tool (not the specialist's), full delegated remediation trace completes end to end
+- **Negative / edge cases (3):** an unknown instance ID is handled gracefully (not a crash); searching the incident log with a keyword that matches nothing returns an explicit "no incidents found" rather than an empty/ambiguous response; restarting an unknown instance is explicitly rejected, not silently ignored
+- **Regression guard (1):** the coordinator correctly SKIPS remediation for an already-healthy instance — proves the branch logic doesn't restart/search unconditionally regardless of actual health
 
 ## What to say in an interview
 

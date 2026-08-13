@@ -74,9 +74,10 @@ cd 01-rag-pipeline
 pytest -q
 ```
 
-4 smoke tests: ingestion completeness, chunk-size bound, retrieval
-relevance (correct doc ranks first), and generation grounding (model
-refuses to answer an out-of-corpus question instead of hallucinating).
+9 tests, in three explicit categories:
+- **Positive path (4):** ingestion completeness, chunk-size bound, retrieval relevance (correct doc ranks first), generation grounding (model refuses an out-of-corpus question)
+- **Negative / edge cases (3):** empty-document chunking, retrieval with k larger than the corpus, retrieval with an empty query string — none should crash
+- **Regression guards (2):** chunking is deterministic across repeated calls on the same input; the model never echoes the raw assembled context block verbatim as its "answer" (would indicate the grounding instruction silently stopped working)
 
 ## What to say in an interview
 

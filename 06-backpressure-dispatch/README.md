@@ -62,11 +62,12 @@ Three scenarios:
 ```bash
 cd 06-backpressure-dispatch && source .venv/bin/activate && pytest -q
 ```
-5 live integration tests against the real Redis instance (no mocking —
-this project's whole point is real queueing/concurrency behavior):
-enqueue-latency bound under a deep queue, worker-count scaling formula,
-full-drain correctness, DLQ landing after max attempts, and replay
-correctness.
+10 live integration tests against the real Redis instance (no mocking —
+this project's whole point is real queueing/concurrency behavior), in
+three categories:
+- **Positive path (5):** enqueue-latency bound under a deep queue, worker-count scaling formula, full-drain correctness, DLQ landing after max attempts, replay correctness
+- **Negative / edge cases (4):** dequeuing from an empty queue returns `None` (not an error), replaying an empty DLQ returns 0, a dispatch cycle against an empty queue processes nothing without crashing, a job that succeeds on its first attempt never lands in the DLQ
+- **Regression guard (1):** worker count at the exact `SCALE_DIVISOR` boundary changes by precisely one worker — catches an off-by-one in the scaling formula
 
 ## What to say in an interview
 

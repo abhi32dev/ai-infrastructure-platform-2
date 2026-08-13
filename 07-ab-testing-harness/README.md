@@ -76,11 +76,10 @@ claiming one.
 ```bash
 cd 07-ab-testing-harness && source .venv/bin/activate && pytest -q
 ```
-5 tests: identical-proportions-not-significant, large-clear-lift-is-significant,
-Welch's-test-detects-a-clear-difference, Welch's-test-correctly-stays-silent
-on a noisy small sample (the exact shape of Experiment B's real result,
-verified with fixed numbers so the test itself has no LLM dependency), and
-the seeded recommender experiment recovering its baked-in lift.
+9 tests, in three categories:
+- **Positive/negative significance calls (4):** identical-proportions-not-significant, large-clear-lift-is-significant, Welch's-test-detects-a-clear-difference, Welch's-test correctly stays silent on a noisy small sample (the exact shape of Experiment B's real result, verified with fixed numbers so this specific test has no LLM dependency)
+- **Negative / edge cases (4):** a negative lift (treatment WORSE than control) is correctly detected as significant, not just "different"; swapping control/treatment flips the lift's sign but not the p-value (symmetry guard against mislabeling which variant is better); zero-variance identical samples produce a `nan` p-value that correctly evaluates as NOT significant rather than crashing or false-claiming an effect; a 0%-vs-0% conversion edge case doesn't crash on a 0/0 division
+- **Live integration (1):** the seeded recommender experiment recovers its baked-in ~7.4% lift
 
 ## What to say in an interview
 
