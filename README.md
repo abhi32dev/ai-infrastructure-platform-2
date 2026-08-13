@@ -1,22 +1,30 @@
 # AI/ML Infrastructure Platform — Hands-On Portfolio
 
-14 self-contained, hands-on projects built to demonstrate — with real
+24 self-contained, hands-on projects built to demonstrate — with real
 measured results, not slideware — the AI/ML infrastructure engineering
-concepts referenced on a Staff/Principal AI Infrastructure resume:
-RAG, multi-model evaluation gates, MLOps/CI regression gating, cost-aware
-model routing, agent runtimes, distributed backpressure/dispatch,
-statistical experimentation, recommendation systems, resilient model
-serving, applied deep learning, the MCP agent protocol, LLM guardrails,
-observability, and cost optimization.
+concepts referenced on a Staff/Principal AI Infrastructure resume, plus
+the highest-frequency gaps found via a real job-market research pass
+(NVIDIA, Tesla, Perplexity, Scale AI, Together AI postings + 2026
+industry trend reports): RAG, multi-model evaluation gates, MLOps/CI
+regression gating, cost-aware model routing, agent runtimes, distributed
+backpressure/dispatch, statistical experimentation, recommendation
+systems, resilient model serving, applied deep learning, the MCP agent
+protocol, LLM guardrails, observability, cost optimization, distributed
+training (DDP), Kubernetes for ML, high-performance inference serving,
+QLoRA fine-tuning, quantization/ONNX, Terraform IaC, feature stores,
+named LLM eval tools (Ragas/DeepEval), TensorFlow/Keras, and GPU FinOps.
 
 See **[PROJECT_LIST.md](PROJECT_LIST.md)** for the full build tracker,
 resume-claim cross-reference table, and repo conventions.
 
 ## Status
 
-**All 14 projects complete, tested, and documented.** 131 tests total,
+**All 24 projects complete, tested, and documented.** 175 tests total,
 all passing, each suite explicitly split into positive-path,
-negative/edge-case, and regression-guard categories.
+negative/edge-case, and regression-guard categories. Every project also
+has a **`PRODUCTION.md`** covering design tradeoffs, what's missing for
+real production use, and scaling/security/operational readiness —
+distinct from each `README.md`'s "what to say in an interview" framing.
 
 ## Projects
 
@@ -36,6 +44,16 @@ negative/edge-case, and regression-guard categories.
 | 12 | [Guardrails layer](12-guardrails/) | Prompt-injection detection, PII redaction, rate limiting — 100% red-team pass rate |
 | 13 | [Observability](13-observability/) | OpenTelemetry tracing + Prometheus + Grafana, verified end-to-end scraping |
 | 14 | [Cost optimization: caching & dashboard](14-cost-optimization/) | Semantic response cache with a real threshold-calibration story; 27% measured savings |
+| 15 | [Distributed training (DDP)](15-distributed-training/) | Real torch.distributed: DDP ranks converge to exactly 0.0 weight distance vs. a diverging no-sync control |
+| 16 | [Kubernetes for ML workloads](16-kubernetes-ml/) | Real kind cluster; found+fixed a real health-check bug via live outage injection |
+| 17 | [High-performance inference serving](17-inference-serving/) | vLLM confirmed infeasible here (tested, not assumed) → llama.cpp; 2.09–2.27x continuous-batching speedup |
+| 18 | [QLoRA fine-tuning](18-lora-finetuning/) | Verified real 4-bit quantization on Apple Silicon, correcting a "CUDA-only" assumption; 0.242% trainable params |
+| 19 | [Quantization & ONNX export](19-quantization-onnx/) | Real MNIST CNN; a reproduced, counter-intuitive finding — INT8 was slower than fp32 here, not faster |
+| 20 | [Terraform IaC](20-terraform-iac/) | S3/DynamoDB/SQS+DLQ against LocalStack, verified with real write/read round-trips, not just `apply` success |
+| 21 | [Feature store (Feast)](21-feature-store/) | Proves point-in-time correctness with data built so "latest" and "as-of-X" provably differ |
+| 22 | [Ragas & DeepEval](22-ragas-deepeval/) | Named eval-tool fluency; a real multi-hour dependency break diagnosed and pinned |
+| 23 | [TensorFlow / Keras](23-tensorflow-keras/) | Direct framework comparison vs. project 19's PyTorch CNN; TFLite export, 100% prediction agreement |
+| 24 | [GPU cost governance / FinOps](24-gpu-finops/) | Honest: simulated telemetry, real tested cost-governance engine — correctly isolated wasted spend to 1 of 4 instances |
 
 ## Repo conventions
 

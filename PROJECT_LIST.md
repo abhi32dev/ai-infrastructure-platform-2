@@ -8,9 +8,12 @@ interview deep-dives. No cloud cost required — everything runs local
 
 Legend: `[ ]` not started · `[~]` in progress · `[x]` done
 
-## Status: all 14 projects complete, tested, documented
+## Status: all 24 projects complete, tested, documented
 
-**131 tests total across all 14 projects, all passing.** Every project's
+**175 tests total across all 24 projects, all passing.** Every project also
+has a `PRODUCTION.md` (design tradeoffs, what's missing for real
+production use, scaling/security/operational readiness) alongside its
+`README.md`. Every project's
 test suite is explicitly split into three categories — check each
 project's README "Tests" section for the exact breakdown:
 - **Positive path** — the feature works as intended under normal input
