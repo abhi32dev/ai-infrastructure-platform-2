@@ -53,7 +53,7 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done
   significance testing" (both Comcast and Smith Micro bullets)
   Stack: Python, scipy.stats, applied to LLM/prompt output quality metrics
 
-- [ ] **08 — Recommendation system with offline eval** (`08-recommender-system/`)
+- [x] **08 — Recommendation system with offline eval** (`08-recommender-system/`) — has its own `.venv/`. Real MovieLens 100K: RMSE 0.9431, MF beats popularity baseline by +30.19% precision@10 (p=0.0017).
   Maps to: "Production Recommendation Systems" (Smith Micro, 7.4% revenue
   lift, validated via A/B + p-value)
   Stack: Python, implicit/collaborative filtering, MovieLens dataset,

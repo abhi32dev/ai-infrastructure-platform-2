@@ -9,5 +9,9 @@ chroma_db/
 mlruns/
 mlflow.db
 mlartifacts/
+08-recommender-system/data/ml-100k/
+08-recommender-system/data/ml-100k.zip
+checkpoints.sqlite
+idempotency_store.json
 *.log
 node_modules/
