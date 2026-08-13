@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flowchart — Ragas & DeepEval</title>
+<link rel="stylesheet" href="../vendor/flowchart.css">
+</head>
+<body>
+  <div class="topbar">
+    <div class="topbar-inner">
+      <span class="mono" style="font-size:12.5px;color:var(--text-tertiary)">SVC-22 · RAGAS & DEEPEVAL</span>
+      <div class="topbar-links">
+        <a href="index.html">← all flowcharts</a>
+        <a href="../index.html">portfolio home</a>
+        <a href="https://github.com/abhi32dev/ai-infrastructure-platform-2/tree/main/22-ragas-deepeval" target="_blank" rel="noopener">view source ↗</a>
+      </div>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <section class="hero">
+      <div class="eyebrow">Logic flow · 22-ragas-deepeval/</div>
+      <h1>Two frameworks, two judge models, two very different failure modes</h1>
+      <p class="hero-sub">The same RAG pipeline gets evaluated twice, by two different open-source frameworks — the diagram follows both paths, including the concurrency fix that rescued Ragas and the intermittent JSON-parsing failure that DeepEval surfaces loudly.</p>
+    </section>
+
+    <div class="section-head"><h2>Legend</h2></div>
+    <div class="legend">
+      <div class="legend-item"><span class="legend-swatch start"></span> Entry point / start</div>
+      <div class="legend-item"><span class="legend-swatch process"></span> Function call (does work)</div>
+      <div class="legend-item"><span class="legend-swatch decision"></span> Real conditional in the code</div>
+      <div class="legend-item"><span class="legend-swatch terminal"></span> Output / end state</div>
+    </div>
+
+    <div class="section-head"><h2>Full logic flow</h2></div>
+    <div class="diagram-card">
+      <img class="diagram-svg" src="svg/22-ragas-deepeval.svg" alt="Flowchart: Ragas & DeepEval logic flow" loading="lazy">
+    </div>
+
+    <div class="section-head"><h2>Node-by-node reference</h2></div>
+    <table class="ref-table">
+      <tr><th>Node</th><th>Location</th><th>What it does</th></tr>
+      <tr><td class="node-id">CONCURRENCY</td><td class="loc">ragas_eval.py:run_ragas_evaluation()</td><td class="desc">Ragas' default concurrency assumes a cloud judge API that handles many parallel requests fine — a local CPU-bound Ollama model doesn't. The real fix: <code>RunConfig(max_workers=2)</code>, which recovered most of the failed <code>context_precision</code> scores from NaN to real numbers.</td></tr>
+      <tr><td class="node-id">JSONPARSE</td><td class="loc">deepeval_eval.py:OllamaDeepEvalModel + DeepEval's internal verdict parser</td><td class="desc">DeepEval's metrics require the judge to output strict JSON. With <code>llama3.2:1b</code>, this SOMETIMES fails — not deterministically. The exact same code, same model, different input text, produced both a clean pass and a hard <code>ValueError</code> on different runs.</td></tr>
+      <tr><td class="node-id">RAISEVALUEERR</td><td class="loc">DeepEval's internal utils.trimAndLoadJson()</td><td class="desc">On unparsable output, DeepEval raises immediately with a specific, actionable message rather than returning a wrong/default score — a LOUD failure, contrasting directly with Ragas' silent NaN on the analogous failure.</td></tr>
+    </table>
+
+    <div class="section-head"><h2>Concrete example paths</h2></div>
+    <div class="scenario-card">
+      <h4>Ragas before the concurrency fix</h4>
+      <p>Default settings: 6 of 16 internal judge sub-calls time out; context_precision comes back NaN for every single question in the eval set.</p>
+      <span class="path">RAGASEVAL(default concurrency) → CONCURRENCY(too high) → TIMEOUTS → RAGASRESULT(NaN for context_precision)</span>
+    </div>
+    <div class="scenario-card">
+      <h4>Ragas after the fix</h4>
+      <p>Same model, same questions, only <code>max_workers=2</code> changed — context_precision recovers to 1.0 for 3 of 4 questions, faithfulness score nearly doubles.</p>
+      <span class="path">RAGASEVAL(max_workers=2) → CONCURRENCY(matched to capacity) → SUCCEEDS → RAGASRESULT(mostly valid scores)</span>
+    </div>
+    <div class="scenario-card">
+      <h4>DeepEval's intermittent JSON failure</h4>
+      <p>The exact same FaithfulnessMetric + llama3.2:1b combination raised ValueError on one test case and returned a valid score on a simpler one — not a bug in this project's code, a real property of small local judge models.</p>
+      <span class="path">DEMETRIC → JSONPARSE(fails on this input) → RAISEVALUEERR  |  DEMETRIC → JSONPARSE(succeeds on a simpler input) → DERESULT</span>
+    </div>
+
+    <div class="footer-nav">
+      <a href="index.html">← back to all flowcharts</a>
+      <a href="https://github.com/abhi32dev/ai-infrastructure-platform-2/tree/main/22-ragas-deepeval" target="_blank" rel="noopener">22-ragas-deepeval source ↗</a>
+    </div>
+  </div>
+</body>
+</html>

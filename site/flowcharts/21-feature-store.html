@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flowchart — Feature Store (Feast)</title>
+<link rel="stylesheet" href="../vendor/flowchart.css">
+</head>
+<body>
+  <div class="topbar">
+    <div class="topbar-inner">
+      <span class="mono" style="font-size:12.5px;color:var(--text-tertiary)">SVC-21 · FEATURE STORE (FEAST)</span>
+      <div class="topbar-links">
+        <a href="index.html">← all flowcharts</a>
+        <a href="../index.html">portfolio home</a>
+        <a href="https://github.com/abhi32dev/ai-infrastructure-platform-2/tree/main/21-feature-store" target="_blank" rel="noopener">view source ↗</a>
+      </div>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <section class="hero">
+      <div class="eyebrow">Logic flow · 21-feature-store/</div>
+      <h1>The point-in-time join, proven with data built specifically to make it provable</h1>
+      <p class="hero-sub">The whole point of this project lives in one decision: given a query timestamp, which of a user’s multiple recorded feature snapshots is the CORRECT one to return? The diagram traces that join, plus the contrasting always-latest online path.</p>
+    </section>
+
+    <div class="section-head"><h2>Legend</h2></div>
+    <div class="legend">
+      <div class="legend-item"><span class="legend-swatch start"></span> Entry point / start</div>
+      <div class="legend-item"><span class="legend-swatch process"></span> Function call (does work)</div>
+      <div class="legend-item"><span class="legend-swatch decision"></span> Real conditional in the code</div>
+      <div class="legend-item"><span class="legend-swatch terminal"></span> Output / end state</div>
+    </div>
+
+    <div class="section-head"><h2>Full logic flow</h2></div>
+    <div class="diagram-card">
+      <img class="diagram-svg" src="svg/21-feature-store.svg" alt="Flowchart: Feature Store (Feast) logic flow" loading="lazy">
+    </div>
+
+    <div class="section-head"><h2>Node-by-node reference</h2></div>
+    <table class="ref-table">
+      <tr><th>Node</th><th>Location</th><th>What it does</th></tr>
+      <tr><td class="node-id">TIMECHECK</td><td class="loc">Feast's internal point-in-time join logic</td><td class="desc">For each user, only snapshots with <code>event_timestamp &lt;= query.event_timestamp</code> qualify — among those, the LATEST qualifying one is chosen. A snapshot recorded AFTER the query time is correctly invisible to that query.</td></tr>
+      <tr><td class="node-id">DROPROW</td><td class="loc">Feast's local file offline store (real finding)</td><td class="desc">When ZERO snapshots qualify (the query timestamp predates the user's earliest recorded snapshot), Feast doesn't return a null-filled row — it DROPS the row from the result entirely. Verified directly: <code>len(result) == 0</code>, not a row of NaNs.</td></tr>
+      <tr><td class="node-id">ONLINELOOKUP</td><td class="loc">store.py:get_online_features()</td><td class="desc">A completely different code path with no timestamp parameter at all — always returns whatever was most recently loaded into the SQLite online store via <code>feast materialize</code>.</td></tr>
+    </table>
+
+    <div class="section-head"><h2>Concrete example paths</h2></div>
+    <div class="scenario-card">
+      <h4>Querying between two recorded snapshots</h4>
+      <p>User 1 has snapshots at day 0 (rating=3.0), day 30 (rating=3.5), and day 60 (rating=4.2). Querying "as of day 15" correctly returns the day-0 value, NOT the latest 4.2 — proving no future information leaked backward.</p>
+      <span class="path">TIMECHECK(day-15 query, day-0 and day-30 both &lt;= query) → PICKLATEST(day-30 is too late, use day-0) → 3.0</span>
+    </div>
+    <div class="scenario-card">
+      <h4>The same user, queried online (right now)</h4>
+      <p>The online path ignores timestamps entirely and returns whatever's freshest — correctly and provably DIFFERENT from the historical query above, even for the identical user.</p>
+      <span class="path">ONLINESTART → ONLINELOOKUP → LATESTONLY → 4.2 (contrasts directly with the 3.0 above)</span>
+    </div>
+    <div class="scenario-card">
+      <h4>Querying before any snapshot exists</h4>
+      <p>A query timestamp before the user's earliest recorded feature value — the row gets dropped entirely from the result, a real, tested, non-obvious behavior worth knowing before it surprises someone in production.</p>
+      <span class="path">TIMECHECK(zero snapshots qualify) → DROPROW → row absent from result DataFrame</span>
+    </div>
+
+    <div class="footer-nav">
+      <a href="index.html">← back to all flowcharts</a>
+      <a href="https://github.com/abhi32dev/ai-infrastructure-platform-2/tree/main/21-feature-store" target="_blank" rel="noopener">21-feature-store source ↗</a>
+    </div>
+  </div>
+</body>
+</html>

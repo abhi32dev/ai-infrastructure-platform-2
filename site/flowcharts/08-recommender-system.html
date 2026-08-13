@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flowchart — Matrix-Factorization Recommender</title>
+<link rel="stylesheet" href="../vendor/flowchart.css">
+</head>
+<body>
+  <div class="topbar">
+    <div class="topbar-inner">
+      <span class="mono" style="font-size:12.5px;color:var(--text-tertiary)">SVC-08 · MATRIX-FACTORIZATION RECOMMENDER</span>
+      <div class="topbar-links">
+        <a href="index.html">← all flowcharts</a>
+        <a href="../index.html">portfolio home</a>
+        <a href="https://github.com/abhi32dev/ai-infrastructure-platform-2/tree/main/08-recommender-system" target="_blank" rel="noopener">view source ↗</a>
+      </div>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <section class="hero">
+      <div class="eyebrow">Logic flow · 08-recommender-system/</div>
+      <h1>How the model learns, predicts, and ranks — and how the baseline stays honest</h1>
+      <p class="hero-sub">A from-scratch SGD training loop, a prediction-clipping guarantee, and a greedy top-k ranking function — plus the separate popularity baseline’s minimum-ratings floor that keeps a single 5-star rating from topping the charts.</p>
+    </section>
+
+    <div class="section-head"><h2>Legend</h2></div>
+    <div class="legend">
+      <div class="legend-item"><span class="legend-swatch start"></span> Entry point / start</div>
+      <div class="legend-item"><span class="legend-swatch process"></span> Function call (does work)</div>
+      <div class="legend-item"><span class="legend-swatch decision"></span> Real conditional in the code</div>
+      <div class="legend-item"><span class="legend-swatch terminal"></span> Output / end state</div>
+    </div>
+
+    <div class="section-head"><h2>Full logic flow</h2></div>
+    <div class="diagram-card">
+      <img class="diagram-svg" src="svg/08-recommender-system.svg" alt="Flowchart: Matrix-Factorization Recommender logic flow" loading="lazy">
+    </div>
+
+    <div class="section-head"><h2>Node-by-node reference</h2></div>
+    <table class="ref-table">
+      <tr><th>Node</th><th>Location</th><th>What it does</th></tr>
+      <tr><td class="node-id">SGDUPDATE</td><td class="loc">matrix_factorization.py:fit()</td><td class="desc">Classic matrix-factorization SGD: for each observed rating, compute the error, then nudge <code>user_bias</code>, <code>item_bias</code>, and both factor vectors by <code>error × learning_rate</code>, minus a regularization penalty.</td></tr>
+      <tr><td class="node-id">CLIP</td><td class="loc">matrix_factorization.py:predict()</td><td class="desc"><code>np.clip(raw_prediction, 1, 5)</code> runs unconditionally — even an untrained model with random initial weights still returns a valid rating, never a nonsensical raw value.</td></tr>
+      <tr><td class="node-id">FILTERLOOP</td><td class="loc">matrix_factorization.py:recommend_top_k()</td><td class="desc">Walks the full sorted-by-score item list, skipping anything in <code>exclude_items</code> (items the user already rated), until <code>k</code> unseen items are collected — or fewer, if the catalog itself is smaller than k.</td></tr>
+      <tr><td class="node-id">FLOOR</td><td class="loc">baseline.py:PopularityBaseline.fit()</td><td class="desc"><code>count &gt;= MIN_RATINGS (20)</code> — this is what keeps a single-review 5-star item from ever appearing in the popularity ranking, regardless of how high its mean rating is.</td></tr>
+    </table>
+
+    <div class="section-head"><h2>Concrete example paths</h2></div>
+    <div class="scenario-card">
+      <h4>Training reduces real prediction error</h4>
+      <p>Measured directly: total squared error across the tiny synthetic dataset is strictly lower after 20 epochs than before any training — proof the SGD updates are actually doing something.</p>
+      <span class="path">EPOCHLOOP×20 → ROWLOOP → SGDUPDATE (repeated) → TRAINED → error_after &lt; error_before</span>
+    </div>
+    <div class="scenario-card">
+      <h4>Recommending to a user who's rated everything</h4>
+      <p><code>exclude_items</code> covers the whole catalog — the filter loop finds nothing to keep, and the function correctly returns an empty list rather than erroring.</p>
+      <span class="path">RECOMMEND → SCORES → SORTRANK → FILTERLOOP(all excluded) → TRUNCATE([]) → RECRESULT([])</span>
+    </div>
+    <div class="scenario-card">
+      <h4>A single 5-star review vs. 24 consistent 4-star reviews</h4>
+      <p>The 5-star item (count=2) never appears in the baseline ranking; the 4-star item (count=24) does — measured directly against the MIN_RATINGS floor.</p>
+      <span class="path">FLOOR(count=2 &lt; 20) → EXCLUDED  |  FLOOR(count=24 &gt;= 20) → INCLUDED</span>
+    </div>
+
+    <div class="footer-nav">
+      <a href="index.html">← back to all flowcharts</a>
+      <a href="https://github.com/abhi32dev/ai-infrastructure-platform-2/tree/main/08-recommender-system" target="_blank" rel="noopener">08-recommender-system source ↗</a>
+    </div>
+  </div>
+</body>
+</html>

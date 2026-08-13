@@ -1,0 +1,41 @@
+flowchart TD
+    START(["train_ddp(world_size=4, epochs)"]) --> SPAWN["mp.get_context('spawn')<br/>launches 4 separate OS processes,<br/>one per rank (0,1,2,3)"]
+
+    SPAWN --> PERRANK["EACH rank independently runs<br/>run_worker(rank, world_size, epochs)"]
+
+    PERRANK --> INITPG["setup(rank, world_size)<br/>dist.init_process_group(<br/>backend='gloo', rank, world_size)<br/>— all 4 ranks must call this<br/>before ANY proceeds"]
+
+    INITPG --> SHARD["DistributedSampler(dataset,<br/>num_replicas=world_size, rank=rank)<br/>— each rank gets a DIFFERENT<br/>1/world_size slice of the data"]
+
+    SHARD --> SAMESEED["torch.manual_seed(0)<br/>— identical init on every rank<br/>BEFORE DDP wrapping"]
+    SAMESEED --> WRAPDDP["DistributedDataParallel(model)<br/>— registers autograd hooks that will<br/>all-reduce gradients automatically"]
+
+    WRAPDDP --> EPOCHLOOP{"for epoch in<br/>range(epochs)"}
+    EPOCHLOOP --> BATCHLOOP{"for X, y in<br/>this rank's DataLoader<br/>(only ITS shard)"}
+
+    BATCHLOOP --> FORWARD["ddp_model(X) → logits<br/>loss = loss_fn(logits, y)"]
+    FORWARD --> BACKWARD["loss.backward()<br/>← THIS is where DDP intercepts:<br/>all-reduces gradients across<br/>ALL 4 ranks before returning"]
+    BACKWARD --> STEP["optimizer.step()<br/>— every rank applies the SAME<br/>(averaged) gradient"]
+    STEP --> BATCHLOOP
+    BATCHLOOP -->|"epoch done"| EPOCHLOOP
+    EPOCHLOOP -->|"all epochs done"| SAVERANK["torch.save(model.state_dict(),<br/>f'ddp_rank{rank}.pt')<br/>— each rank saves its OWN copy"]
+
+    SAVERANK --> RANK0CHECK{"rank == 0?"}
+    RANK0CHECK -->|"Yes"| PUTRESULT["result_queue.put({final_loss, ...})<br/>— only rank 0 reports back<br/>to the parent process"]
+    RANK0CHECK -->|"No"| SKIPPUT["no result reported"]
+
+    PUTRESULT --> CLEANUP["dist.destroy_process_group()"]
+    SKIPPUT --> CLEANUP
+    CLEANUP --> JOINED(["parent process: p.join() on all 4<br/>→ compare_weights.py can now<br/>load all 4 .pt files"])
+
+    JOINED -.->|"compare_weights.py"| COMPARE["max_pairwise_l2('ddp', world_size=4)<br/>flatten each rank's state_dict,<br/>compute L2 distance between<br/>every pair of ranks"]
+    COMPARE --> DISTCHECK{"max distance<br/>&lt; 1e-4?"}
+    DISTCHECK -->|"Yes"| SYNCED(["PROVEN: all ranks converged<br/>to IDENTICAL weights<br/>(measured: exactly 0.0)"])
+    DISTCHECK -->|"No"| NOTSYNCED(["ranks diverged<br/>(this is what train_no_sync.py<br/>produces instead: 0.3655)"])
+
+    classDef startNode fill:#D9F0E5,stroke:#1F8F63,stroke-width:2px
+    classDef decisionNode fill:#FBF3E6,stroke:#B5701F,stroke-width:2px
+    classDef endNode fill:#E8EBEE,stroke:#8993A0,stroke-width:2px
+    class START startNode
+    class EPOCHLOOP,BATCHLOOP,RANK0CHECK,DISTCHECK decisionNode
+    class SYNCED,JOINED endNode

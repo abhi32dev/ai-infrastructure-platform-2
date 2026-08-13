@@ -1,0 +1,52 @@
+flowchart TD
+    START(["train.py : train()"]) --> LOADMODEL["build_model()<br/>fasterrcnn_resnet50_fpn(weights='DEFAULT')<br/>replace box_predictor for 2 classes"]
+    LOADMODEL --> DEVICECHECK{"config.py : DEVICE<br/>cuda available?"}
+    DEVICECHECK -->|"No (this machine)"| CPUFORCED["DEVICE = cpu<br/>(MPS explicitly excluded —<br/>real NaN-loss bug found & documented)"]
+    DEVICECHECK -->|"Yes"| CUDADEVICE["DEVICE = cuda"]
+
+    CPUFORCED --> EPOCHLOOP
+    CUDADEVICE --> EPOCHLOOP
+
+    EPOCHLOOP{"for epoch in<br/>range(EPOCHS)"} --> BATCHLOOP{"for images, targets<br/>in train_loader"}
+    BATCHLOOP --> FORWARD["model(images, targets)<br/>returns loss_dict (multi-task loss)"]
+    FORWARD --> BACKWARD["loss.backward()<br/>optimizer.step()"]
+    BACKWARD --> BATCHLOOP
+    BATCHLOOP -->|"epoch done"| EPOCHLOOP
+    EPOCHLOOP -->|"all epochs done"| SAVECKPT["torch.save(state_dict)"]
+
+    SAVECKPT --> EVALUATE["evaluate.py : evaluate_mean_iou(model, eval_ds)"]
+    EVALUATE --> IMGLOOP{"for img, target<br/>in eval_dataset"}
+    IMGLOOP --> INFER["model([img]) → prediction"]
+    INFER --> SCORECHECK{"prediction.scores &gt;=<br/>SCORE_THRESHOLD (0.5)?"}
+    SCORECHECK -->|"filter kept boxes"| IOUMATCH["box_iou(gt_boxes, pred_boxes)<br/>best_per_gt = max over predictions"]
+    IOUMATCH --> IMGLOOP
+    IMGLOOP -->|"all images done"| MEANIOU(["mean_iou = average<br/>of all best-per-gt IoUs"])
+
+    subgraph TRACKER["tracker.py : IoUTracker.step(detections)"]
+    TSTART(["step(detections) — called once per frame"]) --> HASTRACKS{"self.tracks<br/>is empty?"}
+    HASTRACKS -->|"Yes"| CREATEALL["every detection<br/>becomes a new track"]
+    HASTRACKS -->|"No"| HASDETECT{"detections<br/>is empty?"}
+    HASDETECT -->|"Yes"| MARKMISSED["every existing track:<br/>mark_missed()"]
+    HASDETECT -->|"No"| MATCHLOOP["greedy IoU matching:<br/>sort all (track,detection) pairs<br/>by IoU descending"]
+
+    MATCHLOOP --> PAIRLOOP{"for each pair,<br/>highest IoU first"}
+    PAIRLOOP --> THRESHCHECK{"IoU &gt;=<br/>iou_threshold (0.3)?"}
+    THRESHCHECK -->|"No"| BREAKLOOP["stop — remaining pairs<br/>all below threshold"]
+    THRESHCHECK -->|"Yes"| ALREADYUSED{"track or detection<br/>already matched<br/>this frame?"}
+    ALREADYUSED -->|"Yes"| PAIRLOOP
+    ALREADYUSED -->|"No"| CLAIM["track.update(box)<br/>mark both as matched"]
+    CLAIM --> PAIRLOOP
+
+    BREAKLOOP --> UNMATCHED["unmatched tracks → mark_missed()<br/>unmatched detections → new tracks"]
+    UNMATCHED --> PRUNE["_prune(): drop any track<br/>with missed_frames &gt; max_missed (3)"]
+    MARKMISSED --> PRUNE
+    CREATEALL --> ALIVE(["return {track_id: box}<br/>for all currently-alive tracks"])
+    PRUNE --> ALIVE
+    end
+
+    classDef startNode fill:#D9F0E5,stroke:#1F8F63,stroke-width:2px
+    classDef decisionNode fill:#FBF3E6,stroke:#B5701F,stroke-width:2px
+    classDef endNode fill:#E8EBEE,stroke:#8993A0,stroke-width:2px
+    class START,TSTART startNode
+    class DEVICECHECK,EPOCHLOOP,BATCHLOOP,IMGLOOP,SCORECHECK,HASTRACKS,HASDETECT,PAIRLOOP,THRESHCHECK,ALREADYUSED decisionNode
+    class MEANIOU,ALIVE endNode

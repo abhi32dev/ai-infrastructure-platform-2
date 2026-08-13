@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flowchart — Guardrails Layer</title>
+<link rel="stylesheet" href="../vendor/flowchart.css">
+</head>
+<body>
+  <div class="topbar">
+    <div class="topbar-inner">
+      <span class="mono" style="font-size:12.5px;color:var(--text-tertiary)">SVC-12 · GUARDRAILS LAYER</span>
+      <div class="topbar-links">
+        <a href="index.html">← all flowcharts</a>
+        <a href="../index.html">portfolio home</a>
+        <a href="https://github.com/abhi32dev/ai-infrastructure-platform-2/tree/main/12-guardrails" target="_blank" rel="noopener">view source ↗</a>
+      </div>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <section class="hero">
+      <div class="eyebrow">Logic flow · 12-guardrails/</div>
+      <h1>The full request pipeline, gate by gate</h1>
+      <p class="hero-sub">Every guarded query passes through four sequential checks before reaching the model, and one more on the way back out. The diagram follows a single request through rate limiting, injection detection, PII redaction, generation, and output-leak scanning.</p>
+    </section>
+
+    <div class="section-head"><h2>Legend</h2></div>
+    <div class="legend">
+      <div class="legend-item"><span class="legend-swatch start"></span> Entry point / start</div>
+      <div class="legend-item"><span class="legend-swatch process"></span> Function call (does work)</div>
+      <div class="legend-item"><span class="legend-swatch decision"></span> Real conditional in the code</div>
+      <div class="legend-item"><span class="legend-swatch terminal"></span> Output / end state</div>
+    </div>
+
+    <div class="section-head"><h2>Full logic flow</h2></div>
+    <div class="diagram-card">
+      <img class="diagram-svg" src="svg/12-guardrails.svg" alt="Flowchart: Guardrails Layer logic flow" loading="lazy">
+    </div>
+
+    <div class="section-head"><h2>Node-by-node reference</h2></div>
+    <table class="ref-table">
+      <tr><th>Node</th><th>Location</th><th>What it does</th></tr>
+      <tr><td class="node-id">RATELIMIT / RLCHECK</td><td class="loc">rate_limiter.py:TokenBucketLimiter.allow()</td><td class="desc">A token-bucket check per <code>user_id</code>. If tokens are exhausted, the request is blocked before the LLM is ever called — the cheapest possible rejection.</td></tr>
+      <tr><td class="node-id">INJECTCHECK</td><td class="loc">prompt_injection_detector.py:detect_prompt_injection()</td><td class="desc">Tests the prompt against 8 case-insensitive regex patterns (instruction-override phrasings, role-hijack attempts, system-prompt exfiltration). Any match blocks the request entirely.</td></tr>
+      <tr><td class="node-id">REDACT / FOUNDPII</td><td class="loc">pii_detector.py:redact_pii()</td><td class="desc">Tests 4 PII patterns (email, SSN, phone, credit card). Matches are replaced with <code>[REDACTED_&lt;TYPE&gt;]</code> IN THE PROMPT SENT TO THE MODEL — the request isn't blocked, just sanitized.</td></tr>
+      <tr><td class="node-id">LEAKCHECK</td><td class="loc">output_guardrails.py:check_output()</td><td class="desc">Scans the MODEL'S RESPONSE for PII too — but only flags a leak if the category was ONE OF THE ONES ACTUALLY REDACTED from this specific input, avoiding false-flagging an unrelated category the model might hallucinate.</td></tr>
+    </table>
+
+    <div class="section-head"><h2>Concrete example paths</h2></div>
+    <div class="scenario-card">
+      <h4>A benign question</h4>
+      <p>Passes every gate cleanly — rate limit ok, no injection pattern, no PII to redact, output scan finds nothing to flag.</p>
+      <span class="path">RATELIMIT(ok) → INJECTCHECK(clean) → REDACT(no PII) → LLMCALL → LEAKCHECK(no leak) → ALLOWED</span>
+    </div>
+    <div class="scenario-card">
+      <h4>"Ignore all previous instructions..."</h4>
+      <p>Matches an injection pattern immediately — the LLM is never called at all for this request.</p>
+      <span class="path">RATELIMIT(ok) → INJECTCHECK(matched) → BLOCKED2</span>
+    </div>
+    <div class="scenario-card">
+      <h4>A question containing an email address</h4>
+      <p>The email gets redacted before the model ever sees it; the model can still help with the actual question using the placeholder.</p>
+      <span class="path">REDACT(email found) → REPLACED('[REDACTED_EMAIL]...') → LLMCALL → response doesn't contain the real email → ALLOWED</span>
+    </div>
+    <div class="scenario-card">
+      <h4>Model echoes back a redacted value</h4>
+      <p>If the response somehow contains the same email that was redacted from the input, the output guardrail catches it and withholds the response — the leak check comparing input redactions to output findings.</p>
+      <span class="path">LLMCALL → LEAKCHECK('email' in both output_pii AND redacted_input) → FLAGGED</span>
+    </div>
+
+    <div class="footer-nav">
+      <a href="index.html">← back to all flowcharts</a>
+      <a href="https://github.com/abhi32dev/ai-infrastructure-platform-2/tree/main/12-guardrails" target="_blank" rel="noopener">12-guardrails source ↗</a>
+    </div>
+  </div>
+</body>
+</html>

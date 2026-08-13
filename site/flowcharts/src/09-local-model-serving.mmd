@@ -1,0 +1,40 @@
+flowchart TD
+    START(["POST /generate<br/>app.py : generate(req)"]) --> METRIC1["metrics['requests_total'] += 1"]
+    METRIC1 --> ALLOWCHECK{"breaker.allow_request()<br/>circuit_breaker.py"}
+
+    ALLOWCHECK -->|"state in (CLOSED, HALF_OPEN)<br/>→ True"| DOCALL["httpx.AsyncClient.post()<br/>to Ollama /api/generate"]
+    ALLOWCHECK -->|"state == OPEN<br/>→ False"| FASTFAIL["metrics['requests_rejected_open_circuit'] += 1<br/>raise HTTPException(503)<br/>— 0.001s, no downstream wait"]
+    FASTFAIL --> ENDFAST(["503 response<br/>to caller immediately"])
+
+    DOCALL --> CALLRESULT{"call raises<br/>an exception?"}
+    CALLRESULT -->|"Yes (timeout,<br/>connection refused, etc.)"| RECORDFAIL["breaker.record_failure()<br/>metrics['requests_failed'] += 1<br/>raise HTTPException(502)"]
+    CALLRESULT -->|"No"| RECORDOK["breaker.record_success()<br/>metrics['requests_ok'] += 1<br/>return GenerateResponse"]
+
+    RECORDFAIL --> ENDFAIL(["502 response"])
+    RECORDOK --> ENDOK(["200 response<br/>with model's answer"])
+
+    RECORDFAIL -.-> BREAKERSTATE
+
+    subgraph BREAKER["circuit_breaker.py : CircuitBreaker state machine"]
+    BREAKERSTATE["record_failure()"] --> INCFAIL["_consecutive_failures += 1"]
+    INCFAIL --> STATECHECK{"state == HALF_OPEN<br/>OR<br/>_consecutive_failures &gt;=<br/>failure_threshold (3)?"}
+    STATECHECK -->|"Yes"| TOOPEN["_state = OPEN<br/>_opened_at = now()"]
+    STATECHECK -->|"No"| STAYCLOSED["_state stays CLOSED<br/>(tolerating a transient blip)"]
+
+    TOOPEN --> TIMEPASS{"state property read later:<br/>now() - _opened_at &gt;=<br/>cooldown_seconds (5)?"}
+    TIMEPASS -->|"Yes"| TOHALFOPEN["_state = HALF_OPEN<br/>(one probe request allowed through)"]
+    TIMEPASS -->|"No"| STAYOPEN["still OPEN,<br/>fast-fails every request"]
+
+    TOHALFOPEN --> PROBERESULT{"the ONE probe request:<br/>succeeds or fails?"}
+    PROBERESULT -->|"Succeeds"| RECORDSUCCESS["record_success()<br/>_state = CLOSED<br/>_consecutive_failures = 0"]
+    PROBERESULT -->|"Fails"| REOPENED["record_failure() again<br/>_state = OPEN, cooldown restarts"]
+    end
+
+    classDef startNode fill:#D9F0E5,stroke:#1F8F63,stroke-width:2px
+    classDef decisionNode fill:#FBF3E6,stroke:#B5701F,stroke-width:2px
+    classDef endNode fill:#E8EBEE,stroke:#8993A0,stroke-width:2px
+    classDef warnNode fill:#F7DEDA,stroke:#C23B2E,stroke-width:2px
+    class START startNode
+    class ALLOWCHECK,CALLRESULT,STATECHECK,TIMEPASS,PROBERESULT decisionNode
+    class ENDOK endNode
+    class ENDFAST,ENDFAIL warnNode

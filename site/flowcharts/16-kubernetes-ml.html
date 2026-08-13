@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flowchart — Kubernetes for ML Workloads</title>
+<link rel="stylesheet" href="../vendor/flowchart.css">
+</head>
+<body>
+  <div class="topbar">
+    <div class="topbar-inner">
+      <span class="mono" style="font-size:12.5px;color:var(--text-tertiary)">SVC-16 · KUBERNETES FOR ML WORKLOADS</span>
+      <div class="topbar-links">
+        <a href="index.html">← all flowcharts</a>
+        <a href="../index.html">portfolio home</a>
+        <a href="https://github.com/abhi32dev/ai-infrastructure-platform-2/tree/main/16-kubernetes-ml" target="_blank" rel="noopener">view source ↗</a>
+      </div>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <section class="hero">
+      <div class="eyebrow">Logic flow · 16-kubernetes-ml/</div>
+      <h1>The real bug: why the readiness probe did nothing until it was fixed</h1>
+      <p class="hero-sub">This is the portfolio’s clearest “found a real bug” story. The diagram traces the exact HTTP status code the health endpoint returns under BOTH the buggy and fixed versions, and what Kubernetes actually does with each.</p>
+    </section>
+
+    <div class="section-head"><h2>Legend</h2></div>
+    <div class="legend">
+      <div class="legend-item"><span class="legend-swatch start"></span> Entry point / start</div>
+      <div class="legend-item"><span class="legend-swatch process"></span> Function call (does work)</div>
+      <div class="legend-item"><span class="legend-swatch decision"></span> Real conditional in the code</div>
+      <div class="legend-item"><span class="legend-swatch terminal"></span> Output / end state</div>
+    </div>
+
+    <div class="section-head"><h2>Full logic flow</h2></div>
+    <div class="diagram-card">
+      <img class="diagram-svg" src="svg/16-kubernetes-ml.svg" alt="Flowchart: Kubernetes for ML Workloads logic flow" loading="lazy">
+    </div>
+
+    <div class="section-head"><h2>Node-by-node reference</h2></div>
+    <table class="ref-table">
+      <tr><th>Node</th><th>Location</th><th>What it does</th></tr>
+      <tr><td class="node-id">STATUSCODE</td><td class="loc">app.py:health()</td><td class="desc">The actual bug: the original endpoint always returned HTTP 200 with a JSON body saying <code>healthy: true/false</code> — but a Kubernetes <code>httpGet</code> probe never parses the body, only the status code. The fix returns <code>503</code> when unhealthy.</td></tr>
+      <tr><td class="node-id">FAILTHRESH</td><td class="loc">k8s/deployment.yaml (readinessProbe)</td><td class="desc"><code>failureThreshold: 2</code> — deliberately fast to react, since readiness controls whether traffic reaches this pod at all.</td></tr>
+      <tr><td class="node-id">LIVEFAILCHECK</td><td class="loc">k8s/deployment.yaml (livenessProbe)</td><td class="desc"><code>failureThreshold: 5</code> — deliberately MORE tolerant than readiness, because liveness triggers a pod RESTART, which shouldn't happen just because a downstream dependency is temporarily degraded.</td></tr>
+      <tr><td class="node-id">HALFOPENGAP</td><td class="loc">circuit_breaker.py + app.py:health()</td><td class="desc">A second, subtler real finding: once the breaker auto-transitions to HALF_OPEN after cooldown, it reads as healthy — but <code>/health</code> never actively re-pings Ollama, so with no real traffic flowing, a pod can look ready while its downstream is still genuinely down.</td></tr>
+    </table>
+
+    <div class="section-head"><h2>Concrete example paths</h2></div>
+    <div class="scenario-card">
+      <h4>Before the fix: an outage that Kubernetes never notices</h4>
+      <p>Ollama is stopped, the circuit breaker correctly trips to OPEN — but <code>kubectl get pods</code> still shows the pod as Ready, because the probe only ever saw HTTP 200.</p>
+      <span class="path">STATUSCODE(always 200) → PROBEOUTCOME(200) → STAYREADY — despite the real outage</span>
+    </div>
+    <div class="scenario-card">
+      <h4>After the fix: a real outage correctly removes the pod from rotation</h4>
+      <p>Same outage, same broken circuit — but now the probe sees 503, hits failureThreshold after 2 checks, and Kubernetes genuinely stops routing traffic to this pod. Verified live by stopping the real Ollama process.</p>
+      <span class="path">STATUSCODE(503 when unhealthy) → PROBEOUTCOME(503) → FAILTHRESH(2/2) → NOTREADY → NOTRAFFIC</span>
+    </div>
+    <div class="scenario-card">
+      <h4>The HALF_OPEN gap, found during the same live test</h4>
+      <p>After the fix above, waiting past the breaker's cooldown showed the pod flip back to Ready — even though Ollama was still down — because nothing was sending real traffic to re-trigger a failure.</p>
+      <span class="path">NOTREADY → [cooldown passes, no traffic] → HALFOPENGAP → STALEHEALTHY (documented, not silently patched)</span>
+    </div>
+
+    <div class="footer-nav">
+      <a href="index.html">← back to all flowcharts</a>
+      <a href="https://github.com/abhi32dev/ai-infrastructure-platform-2/tree/main/16-kubernetes-ml" target="_blank" rel="noopener">16-kubernetes-ml source ↗</a>
+    </div>
+  </div>
+</body>
+</html>

@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flowchart — MCP Agent-to-Agent Protocol</title>
+<link rel="stylesheet" href="../vendor/flowchart.css">
+</head>
+<body>
+  <div class="topbar">
+    <div class="topbar-inner">
+      <span class="mono" style="font-size:12.5px;color:var(--text-tertiary)">SVC-11 · MCP AGENT-TO-AGENT PROTOCOL</span>
+      <div class="topbar-links">
+        <a href="index.html">← all flowcharts</a>
+        <a href="../index.html">portfolio home</a>
+        <a href="https://github.com/abhi32dev/ai-infrastructure-platform-2/tree/main/11-mcp-agent-protocol" target="_blank" rel="noopener">view source ↗</a>
+      </div>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <section class="hero">
+      <div class="eyebrow">Logic flow · 11-mcp-agent-protocol/</div>
+      <h1>How one agent delegates to another without ever seeing its internals</h1>
+      <p class="hero-sub">The coordinator exposes exactly ONE tool to its caller, but internally acts as an MCP client of a second server — the diagram traces the full delegation chain and the real state-persistence bug found while building it.</p>
+    </section>
+
+    <div class="section-head"><h2>Legend</h2></div>
+    <div class="legend">
+      <div class="legend-item"><span class="legend-swatch start"></span> Entry point / start</div>
+      <div class="legend-item"><span class="legend-swatch process"></span> Function call (does work)</div>
+      <div class="legend-item"><span class="legend-swatch decision"></span> Real conditional in the code</div>
+      <div class="legend-item"><span class="legend-swatch terminal"></span> Output / end state</div>
+    </div>
+
+    <div class="section-head"><h2>Full logic flow</h2></div>
+    <div class="diagram-card">
+      <img class="diagram-svg" src="svg/11-mcp-agent-protocol.svg" alt="Flowchart: MCP Agent-to-Agent Protocol logic flow" loading="lazy">
+    </div>
+
+    <div class="section-head"><h2>Node-by-node reference</h2></div>
+    <table class="ref-table">
+      <tr><th>Node</th><th>Location</th><th>What it does</th></tr>
+      <tr><td class="node-id">OPENSESSION</td><td class="loc">coordinator_server.py:diagnose_and_remediate_fleet()</td><td class="desc">Opens ONE persistent <code>stdio_client</code> session to the specialist and reuses it for every sub-call in this invocation — the real bug fixed here: an earlier version opened a FRESH session per call, which reset the specialist's in-memory state between every step.</td></tr>
+      <tr><td class="node-id">HEALTHYCHECK</td><td class="loc">coordinator_server.py</td><td class="desc">A plain substring check: <code>'unhealthy' in health_response</code>. This is what decides whether the expensive remediation path (restart + search + re-check) runs at all.</td></tr>
+      <tr><td class="node-id">MUTATE</td><td class="loc">specialist_server.py:restart_instance()</td><td class="desc">Directly mutates the shared <code>_INSTANCES</code> dict in the specialist process's memory — because the coordinator reused the same session, the NEXT health check in this same call sees the mutation.</td></tr>
+      <tr><td class="node-id">MATCHCHECK</td><td class="loc">specialist_server.py:search_incident_log()</td><td class="desc">A simple substring search across a hardcoded incident list — returns an explicit "no incidents found" string rather than an empty/ambiguous response when nothing matches.</td></tr>
+    </table>
+
+    <div class="section-head"><h2>Concrete example paths</h2></div>
+    <div class="scenario-card">
+      <h4>Full remediation of an unhealthy instance</h4>
+      <p>Health check finds it unhealthy → restart mutates the shared state → incident search runs → re-check reads the SAME session's now-healthy state.</p>
+      <span class="path">HEALTHCALL → KNOWNCHECK(Yes) → HEALTHYCHECK(True) → RESTARTCALL → MUTATE → SEARCHCALL → RECHECKCALL → status=healthy</span>
+    </div>
+    <div class="scenario-card">
+      <h4>Already-healthy instance, no wasted work</h4>
+      <p>The coordinator's branch logic short-circuits entirely — restart and search are never called for an instance that's already fine.</p>
+      <span class="path">HEALTHCALL → HEALTHYCHECK(False) → SKIP → RETURNLOG1</span>
+    </div>
+    <div class="scenario-card">
+      <h4>The state-persistence bug I actually hit</h4>
+      <p>An earlier version opened a NEW specialist subprocess for each of the 4 sub-calls — restart's mutation happened in a process that was immediately discarded, so the final re-check saw a FRESH, still-unhealthy specialist.</p>
+      <span class="path">[BROKEN]: RESTARTCALL(session A, mutates A) → RECHECKCALL(session B, fresh) → still unhealthy — FIXED by reusing one session</span>
+    </div>
+
+    <div class="footer-nav">
+      <a href="index.html">← back to all flowcharts</a>
+      <a href="https://github.com/abhi32dev/ai-infrastructure-platform-2/tree/main/11-mcp-agent-protocol" target="_blank" rel="noopener">11-mcp-agent-protocol source ↗</a>
+    </div>
+  </div>
+</body>
+</html>

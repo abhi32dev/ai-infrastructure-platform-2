@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flowchart — Cost-Aware Model Router</title>
+<link rel="stylesheet" href="../vendor/flowchart.css">
+</head>
+<body>
+  <div class="topbar">
+    <div class="topbar-inner">
+      <span class="mono" style="font-size:12.5px;color:var(--text-tertiary)">SVC-04 · COST-AWARE MODEL ROUTER</span>
+      <div class="topbar-links">
+        <a href="index.html">← all flowcharts</a>
+        <a href="../index.html">portfolio home</a>
+        <a href="https://github.com/abhi32dev/ai-infrastructure-platform-2/tree/main/04-cost-aware-router" target="_blank" rel="noopener">view source ↗</a>
+      </div>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <section class="hero">
+      <div class="eyebrow">Logic flow · 04-cost-aware-router/</div>
+      <h1>How a query gets classified, routed, and priced</h1>
+      <p class="hero-sub">Two independent flows live in this project: the router (<code>router.py</code>) that decides SIMPLE vs. COMPLEX for every query, and the chunk-size sweep (<code>chunk_sweep.py</code>) that separately searches for the best cost/quality frontier. The diagram traces both.</p>
+    </section>
+
+    <div class="section-head"><h2>Legend</h2></div>
+    <div class="legend">
+      <div class="legend-item"><span class="legend-swatch start"></span> Entry point / start</div>
+      <div class="legend-item"><span class="legend-swatch process"></span> Function call (does work)</div>
+      <div class="legend-item"><span class="legend-swatch decision"></span> Real conditional in the code</div>
+      <div class="legend-item"><span class="legend-swatch terminal"></span> Output / end state</div>
+    </div>
+
+    <div class="section-head"><h2>Full logic flow</h2></div>
+    <div class="diagram-card">
+      <img class="diagram-svg" src="svg/04-cost-aware-router.svg" alt="Flowchart: Cost-Aware Model Router logic flow" loading="lazy">
+    </div>
+
+    <div class="section-head"><h2>Node-by-node reference</h2></div>
+    <table class="ref-table">
+      <tr><th>Node</th><th>Location</th><th>What it does</th></tr>
+      <tr><td class="node-id">CLASSIFY / PARSE</td><td class="loc">router.py:classify()</td><td class="desc">The small model classifies its own query's complexity. Two separate failure modes are both handled: <code>json.loads()</code> raising an exception (unparsable), and a valid-JSON-but-wrong-value tier (the model returning something other than SIMPLE/COMPLEX).</td></tr>
+      <tr><td class="node-id">ROUTE</td><td class="loc">router.py:route_and_answer()</td><td class="desc">The actual routing decision is a single <code>if tier == 'SIMPLE'</code> — everything else, including any fail-safe outcome from PARSE, routes to the LARGE model. The fail-safe direction matters: ambiguity costs a few cents extra, never a wrong-cheap answer on a hard query.</td></tr>
+      <tr><td class="node-id">SLOOP1 / SLOOP2</td><td class="loc">chunk_sweep.py:sweep()</td><td class="desc">A nested loop: for each of 3 chunk sizes, rebuild a fresh Chroma index, then for each of 3 <code>k</code> values, run all 4 eval questions and score hit-rate — 9 total configurations measured.</td></tr>
+      <tr><td class="node-id">KEYWORDCHECK</td><td class="loc">chunk_sweep.py:sweep()</td><td class="desc">A deterministic (not LLM-judged) quality proxy: does the retrieved context contain the expected keyword string? Chosen specifically to remove judge-model variance from the chunk-size measurement.</td></tr>
+    </table>
+
+    <div class="section-head"><h2>Concrete example paths</h2></div>
+    <div class="scenario-card">
+      <h4>A simple factual question</h4>
+      <p>"Who approves a rollback?" classifies as SIMPLE (matches expectation) → routed to the cheap model, both because it's actually simple and because that's what the small classifier decided.</p>
+      <span class="path">CLASSIFY → PARSE(ok) → VALIDTIER(ok) → ROUTE(SIMPLE) → SMALLMODEL → GENERATE</span>
+    </div>
+    <div class="scenario-card">
+      <h4>Classifier returns garbage</h4>
+      <p>If the small model responds with non-JSON text, the code never lets that silently become SIMPLE routing — it defaults to the safer, more expensive path.</p>
+      <span class="path">CLASSIFY → PARSE(fails) → FAILSAFE1(COMPLEX) → ROUTE → LARGEMODEL → GENERATE</span>
+    </div>
+    <div class="scenario-card">
+      <h4>Finding the best chunk_size/k</h4>
+      <p>Sweeping 3×3=9 configs found chunk_size=1000, k=4 as the best hit-rate-per-token point — going to k=6 at the same chunk size added ~365 tokens per query for zero additional hit-rate.</p>
+      <span class="path">SLOOP1(1000) → SLOOP2(4) → KEYWORDCHECK(4/4 hit) → BEST</span>
+    </div>
+
+    <div class="footer-nav">
+      <a href="index.html">← back to all flowcharts</a>
+      <a href="https://github.com/abhi32dev/ai-infrastructure-platform-2/tree/main/04-cost-aware-router" target="_blank" rel="noopener">04-cost-aware-router source ↗</a>
+    </div>
+  </div>
+</body>
+</html>

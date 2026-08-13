@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flowchart — QLoRA Fine-Tuning</title>
+<link rel="stylesheet" href="../vendor/flowchart.css">
+</head>
+<body>
+  <div class="topbar">
+    <div class="topbar-inner">
+      <span class="mono" style="font-size:12.5px;color:var(--text-tertiary)">SVC-18 · QLORA FINE-TUNING</span>
+      <div class="topbar-links">
+        <a href="index.html">← all flowcharts</a>
+        <a href="../index.html">portfolio home</a>
+        <a href="https://github.com/abhi32dev/ai-infrastructure-platform-2/tree/main/18-lora-finetuning" target="_blank" rel="noopener">view source ↗</a>
+      </div>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <section class="hero">
+      <div class="eyebrow">Logic flow · 18-lora-finetuning/</div>
+      <h1>From verifying real quantization to a parameter-efficient training loop</h1>
+      <p class="hero-sub">The diagram starts with the hardware-feasibility check that corrected a wrong assumption from the research (“QLoRA is CUDA-only”), then follows the actual training loop and the honest before/after evaluation.</p>
+    </section>
+
+    <div class="section-head"><h2>Legend</h2></div>
+    <div class="legend">
+      <div class="legend-item"><span class="legend-swatch start"></span> Entry point / start</div>
+      <div class="legend-item"><span class="legend-swatch process"></span> Function call (does work)</div>
+      <div class="legend-item"><span class="legend-swatch decision"></span> Real conditional in the code</div>
+      <div class="legend-item"><span class="legend-swatch terminal"></span> Output / end state</div>
+    </div>
+
+    <div class="section-head"><h2>Full logic flow</h2></div>
+    <div class="diagram-card">
+      <img class="diagram-svg" src="svg/18-lora-finetuning.svg" alt="Flowchart: QLoRA Fine-Tuning logic flow" loading="lazy">
+    </div>
+
+    <div class="section-head"><h2>Node-by-node reference</h2></div>
+    <table class="ref-table">
+      <tr><th>Node</th><th>Location</th><th>What it does</th></tr>
+      <tr><td class="node-id">QUANTCHECK</td><td class="loc">train_qlora.py:count_quantized_linear_layers()</td><td class="desc">Directly inspects the loaded model's modules for <code>type(m).__name__ == 'Linear4bit'</code> — this is what PROVED real 4-bit quantization was happening on this Apple Silicon CPU, rather than assuming the commonly-cited "CUDA-only" claim still held without testing it.</td></tr>
+      <tr><td class="node-id">PCTCHECK</td><td class="loc">train_qlora.py:trainable_param_stats()</td><td class="desc">Measured directly: 147,456 trainable parameters out of 60,826,368 total — 0.242%. This is the number QLoRA exists to shrink, verified by actually counting <code>p.requires_grad</code> parameters, not assumed from the config.</td></tr>
+      <tr><td class="node-id">BACKWARD</td><td class="loc">train_qlora.py:train()</td><td class="desc">Because <code>prepare_model_for_kbit_training()</code> froze the quantized base and <code>get_peft_model()</code> only unfroze the LoRA adapter matrices, <code>loss.backward()</code> only ever computes gradients for that 0.242% — a negative test directly verifies NO parameter outside the LoRA adapter has <code>requires_grad=True</code>.</td></tr>
+      <tr><td class="node-id">COMPARE_OUT</td><td class="loc">evaluate.py:compare()</td><td class="desc">Loads a SECOND, completely fresh copy of the base model (no adapter) specifically so the before/after comparison is fair — not comparing the fine-tuned model against its own earlier checkpoint.</td></tr>
+    </table>
+
+    <div class="section-head"><h2>Concrete example paths</h2></div>
+    <div class="scenario-card">
+      <h4>Verifying quantization actually works here (a real surprise)</h4>
+      <p>The research claimed 4-bit quantization needs CUDA. Tested directly instead of assumed: bitsandbytes 0.50.1 produced genuine Linear4bit layers on this CPU — the project ended up doing REAL QLoRA, not a fallback.</p>
+      <span class="path">LOADQUANT → VERIFYQUANT(count=24) → QUANTCHECK(&gt;0 → Yes) → PROCEED</span>
+    </div>
+    <div class="scenario-card">
+      <h4>8 epochs of training, watching loss actually move</h4>
+      <p>Loss drops monotonically from 5.18 to 4.06 across all 8 epochs — proof the tiny 0.242% of trainable parameters are genuinely receiving useful gradient signal.</p>
+      <span class="path">TRAINLOOP×8 → [BATCHLOOP → FORWARD → BACKWARD(only LoRA params)] → SAVEADAPTER(591KB)</span>
+    </div>
+    <div class="scenario-card">
+      <h4>Honest before/after comparison</h4>
+      <p>Neither the base model nor the fine-tuned model produces fluent output at this scale (82M params, 24 examples) — but the fine-tuned model's phrasing measurably shifts toward the training pattern, which is the real, correctly-scoped claim.</p>
+      <span class="path">GENBASE('generic repetition') vs. GENFT('topically on-target phrasing') → COMPARE_OUT(honest, not cherry-picked)</span>
+    </div>
+
+    <div class="footer-nav">
+      <a href="index.html">← back to all flowcharts</a>
+      <a href="https://github.com/abhi32dev/ai-infrastructure-platform-2/tree/main/18-lora-finetuning" target="_blank" rel="noopener">18-lora-finetuning source ↗</a>
+    </div>
+  </div>
+</body>
+</html>

@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flowchart — Detection & Tracking</title>
+<link rel="stylesheet" href="../vendor/flowchart.css">
+</head>
+<body>
+  <div class="topbar">
+    <div class="topbar-inner">
+      <span class="mono" style="font-size:12.5px;color:var(--text-tertiary)">SVC-10 · DETECTION & TRACKING</span>
+      <div class="topbar-links">
+        <a href="index.html">← all flowcharts</a>
+        <a href="../index.html">portfolio home</a>
+        <a href="https://github.com/abhi32dev/ai-infrastructure-platform-2/tree/main/10-deep-learning-demo" target="_blank" rel="noopener">view source ↗</a>
+      </div>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <section class="hero">
+      <div class="eyebrow">Logic flow · 10-deep-learning-demo/</div>
+      <h1>From transfer learning to a real bug fix, to frame-by-frame tracking</h1>
+      <p class="hero-sub">Two independent systems: a Faster R-CNN fine-tuning loop (and the real MPS bug that forced it onto CPU), and a greedy IoU tracker’s frame-by-frame matching and pruning logic.</p>
+    </section>
+
+    <div class="section-head"><h2>Legend</h2></div>
+    <div class="legend">
+      <div class="legend-item"><span class="legend-swatch start"></span> Entry point / start</div>
+      <div class="legend-item"><span class="legend-swatch process"></span> Function call (does work)</div>
+      <div class="legend-item"><span class="legend-swatch decision"></span> Real conditional in the code</div>
+      <div class="legend-item"><span class="legend-swatch terminal"></span> Output / end state</div>
+    </div>
+
+    <div class="section-head"><h2>Full logic flow</h2></div>
+    <div class="diagram-card">
+      <img class="diagram-svg" src="svg/10-deep-learning-demo.svg" alt="Flowchart: Detection & Tracking logic flow" loading="lazy">
+    </div>
+
+    <div class="section-head"><h2>Node-by-node reference</h2></div>
+    <table class="ref-table">
+      <tr><th>Node</th><th>Location</th><th>What it does</th></tr>
+      <tr><td class="node-id">DEVICECHECK</td><td class="loc">config.py</td><td class="desc">Deliberately excludes MPS even though it's available on this Mac — a direct, reproduced finding: MPS training on this model produced NaN losses; CPU training with identical code did not.</td></tr>
+      <tr><td class="node-id">SCORECHECK</td><td class="loc">evaluate.py:evaluate_mean_iou()</td><td class="desc">Predictions below <code>SCORE_THRESHOLD (0.5)</code> confidence are filtered out before IoU matching — a low-confidence box shouldn't count as a correct detection even if it happens to overlap the ground truth.</td></tr>
+      <tr><td class="node-id">PAIRLOOP / THRESHCHECK</td><td class="loc">tracker.py:IoUTracker.step()</td><td class="desc">Greedy matching: sort every (track, detection) pair by IoU, claim the highest-IoU pairs first, stop entirely once IoU drops below <code>iou_threshold (0.3)</code> — remaining pairs are too weak to be the same object.</td></tr>
+      <tr><td class="node-id">PRUNE</td><td class="loc">tracker.py:IoUTracker._prune()</td><td class="desc">A track survives being unmatched for up to <code>max_missed (3)</code> frames (tolerating brief occlusion) before being dropped — this is what distinguishes a real, briefly-occluded object from a one-off false detection.</td></tr>
+    </table>
+
+    <div class="section-head"><h2>Concrete example paths</h2></div>
+    <div class="scenario-card">
+      <h4>The MPS bug, found and fixed</h4>
+      <p>Identical model, identical data — CPU forward pass produces finite losses; MPS training diverges to NaN by end of epoch 1. Diagnosed by isolating a single-sample CPU forward pass before suspecting the backend.</p>
+      <span class="path">DEVICECHECK(MPS available) → CPUFORCED(excluded anyway) → training converges 0.25→0.10 loss</span>
+    </div>
+    <div class="scenario-card">
+      <h4>A briefly-occluded object reappears</h4>
+      <p>An object missing for 2 frames (within max_missed=3) reappears and is matched back to its EXISTING track ID, not assigned a new one — the actual point of tolerating missed frames.</p>
+      <span class="path">step([]) → MARKMISSED → step([]) → MARKMISSED → step([reappears]) → MATCHLOOP → same track_id</span>
+    </div>
+    <div class="scenario-card">
+      <h4>A one-frame false detection</h4>
+      <p>Gets its own track ID at creation (the tracker can't know it's spurious yet) but is never re-matched — its history length of 1 is exactly the signal a real system would filter on.</p>
+      <span class="path">step([real, spurious]) → CREATEALL(spurious → new track) → step([real only]) → spurious track: MARKMISSED → eventually PRUNEd</span>
+    </div>
+
+    <div class="footer-nav">
+      <a href="index.html">← back to all flowcharts</a>
+      <a href="https://github.com/abhi32dev/ai-infrastructure-platform-2/tree/main/10-deep-learning-demo" target="_blank" rel="noopener">10-deep-learning-demo source ↗</a>
+    </div>
+  </div>
+</body>
+</html>

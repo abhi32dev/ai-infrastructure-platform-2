@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flowchart — Agent Runtime (LangGraph)</title>
+<link rel="stylesheet" href="../vendor/flowchart.css">
+</head>
+<body>
+  <div class="topbar">
+    <div class="topbar-inner">
+      <span class="mono" style="font-size:12.5px;color:var(--text-tertiary)">SVC-05 · AGENT RUNTIME (LANGGRAPH)</span>
+      <div class="topbar-links">
+        <a href="index.html">← all flowcharts</a>
+        <a href="../index.html">portfolio home</a>
+        <a href="https://github.com/abhi32dev/ai-infrastructure-platform-2/tree/main/05-agent-runtime" target="_blank" rel="noopener">view source ↗</a>
+      </div>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <section class="hero">
+      <div class="eyebrow">Logic flow · 05-agent-runtime/</div>
+      <h1>How a workflow pauses, resumes, retries, and never repeats itself</h1>
+      <p class="hero-sub">This is a real LangGraph state machine — the diagram follows one <code>graph.invoke()</code> call through risk assessment, an optional human-approval pause that can span a process restart, idempotency checking, and bounded retry, node by node.</p>
+    </section>
+
+    <div class="section-head"><h2>Legend</h2></div>
+    <div class="legend">
+      <div class="legend-item"><span class="legend-swatch start"></span> Entry point / start</div>
+      <div class="legend-item"><span class="legend-swatch process"></span> Function call (does work)</div>
+      <div class="legend-item"><span class="legend-swatch decision"></span> Real conditional in the code</div>
+      <div class="legend-item"><span class="legend-swatch terminal"></span> Output / end state</div>
+    </div>
+
+    <div class="section-head"><h2>Full logic flow</h2></div>
+    <div class="diagram-card">
+      <img class="diagram-svg" src="svg/05-agent-runtime.svg" alt="Flowchart: Agent Runtime (LangGraph) logic flow" loading="lazy">
+    </div>
+
+    <div class="section-head"><h2>Node-by-node reference</h2></div>
+    <table class="ref-table">
+      <tr><th>Node</th><th>Location</th><th>What it does</th></tr>
+      <tr><td class="node-id">DECIDE</td><td class="loc">graph.py:decide_action()</td><td class="desc">A static rule, deliberately not an LLM call: <code>requires_approval = action in RISKY_ACTIONS</code>. Kept simple so this project's graph-mechanics tests stay 100% deterministic.</td></tr>
+      <tr><td class="node-id">HUMANNODE</td><td class="loc">graph.py:human_approval()</td><td class="desc">Calls LangGraph's <code>interrupt()</code>, which genuinely pauses the graph — execution doesn't resume until something later calls <code>graph.invoke(Command(resume=...))</code> with the same <code>thread_id</code>, possibly from an entirely new process.</td></tr>
+      <tr><td class="node-id">IDEMCHECK</td><td class="loc">idempotency_store.py:has_been_executed()</td><td class="desc">Reads a JSON file on disk keyed by <code>idempotency_key</code>. If the SAME key was already executed — even in a previous, now-dead process — the action is skipped, not repeated.</td></tr>
+      <tr><td class="node-id">SIMFAIL / MAXCHECK</td><td class="loc">graph.py:execute_action()</td><td class="desc"><code>simulate_failures</code> is a test hook (real code has real transient failures instead). <code>MAX_ATTEMPTS=3</code> caps the retry loop — the graph reroutes back to <code>execute_action</code> via <code>route_after_execute()</code> until it either succeeds or gives up.</td></tr>
+    </table>
+
+    <div class="section-head"><h2>Concrete example paths</h2></div>
+    <div class="scenario-card">
+      <h4>Safe action, no approval needed</h4>
+      <p>"restart_instance" isn't in RISKY_ACTIONS — the graph skips the human-approval node entirely and goes straight to execution.</p>
+      <span class="path">CHECKSIT → DECIDE(False) → ROUTEDECIDE(False) → EXECNODE → IDEMCHECK(No) → SUCCEED → END</span>
+    </div>
+    <div class="scenario-card">
+      <h4>Risky action, paused, resumed after a simulated restart</h4>
+      <p>"delete_data" triggers <code>interrupt()</code>. The demo then opens a BRAND NEW checkpointer connection (simulating a process restart) before resuming with rejection — proving the pause survived, not just paused in memory.</p>
+      <span class="path">DECIDE(True) → HUMANNODE(interrupt) → [new process] → RESUME → ROUTEAPPROVE(False) → BLOCKEDNODE → END</span>
+    </div>
+    <div class="scenario-card">
+      <h4>The same idempotency key invoked twice</h4>
+      <p>First call executes and marks the key done; a second call with the identical key hits the cache and does NOT re-run the action — even from a different graph thread.</p>
+      <span class="path">EXECNODE → IDEMCHECK(Yes) → CACHEHIT → END</span>
+    </div>
+    <div class="scenario-card">
+      <h4>Transient failure, then success within budget</h4>
+      <p><code>simulate_failures=2</code> means attempts 1 and 2 fail; attempt 3 (exactly at MAX_ATTEMPTS) succeeds — the boundary case verified by a dedicated test.</p>
+      <span class="path">EXECNODE(attempt=1,fail) → RETRYING → EXECNODE(attempt=2,fail) → RETRYING → EXECNODE(attempt=3,ok) → SUCCEED</span>
+    </div>
+
+    <div class="footer-nav">
+      <a href="index.html">← back to all flowcharts</a>
+      <a href="https://github.com/abhi32dev/ai-infrastructure-platform-2/tree/main/05-agent-runtime" target="_blank" rel="noopener">05-agent-runtime source ↗</a>
+    </div>
+  </div>
+</body>
+</html>

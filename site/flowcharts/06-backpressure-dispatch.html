@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flowchart — Backpressure + Adaptive Dispatch</title>
+<link rel="stylesheet" href="../vendor/flowchart.css">
+</head>
+<body>
+  <div class="topbar">
+    <div class="topbar-inner">
+      <span class="mono" style="font-size:12.5px;color:var(--text-tertiary)">SVC-06 · BACKPRESSURE + ADAPTIVE DISPATCH</span>
+      <div class="topbar-links">
+        <a href="index.html">← all flowcharts</a>
+        <a href="../index.html">portfolio home</a>
+        <a href="https://github.com/abhi32dev/ai-infrastructure-platform-2/tree/main/06-backpressure-dispatch" target="_blank" rel="noopener">view source ↗</a>
+      </div>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <section class="hero">
+      <div class="eyebrow">Logic flow · 06-backpressure-dispatch/</div>
+      <h1>How ingestion never blocks and every job finds its way to success or the DLQ</h1>
+      <p class="hero-sub">Real Redis, real concurrency. The diagram follows one dispatch cycle from queue-depth read through adaptive worker sizing to the per-job success/retry/DLQ branch, plus the separate DLQ-replay flow.</p>
+    </section>
+
+    <div class="section-head"><h2>Legend</h2></div>
+    <div class="legend">
+      <div class="legend-item"><span class="legend-swatch start"></span> Entry point / start</div>
+      <div class="legend-item"><span class="legend-swatch process"></span> Function call (does work)</div>
+      <div class="legend-item"><span class="legend-swatch decision"></span> Real conditional in the code</div>
+      <div class="legend-item"><span class="legend-swatch terminal"></span> Output / end state</div>
+    </div>
+
+    <div class="section-head"><h2>Full logic flow</h2></div>
+    <div class="diagram-card">
+      <img class="diagram-svg" src="svg/06-backpressure-dispatch.svg" alt="Flowchart: Backpressure + Adaptive Dispatch logic flow" loading="lazy">
+    </div>
+
+    <div class="section-head"><h2>Node-by-node reference</h2></div>
+    <table class="ref-table">
+      <tr><th>Node</th><th>Location</th><th>What it does</th></tr>
+      <tr><td class="node-id">WORKERCALC</td><td class="loc">worker_pool.py:desired_worker_count()</td><td class="desc"><code>max(MIN, min(MAX, depth // SCALE_DIVISOR + 1))</code> — a simple formula, but it's what makes worker count respond to observed load rather than running a fixed pool sized for peak.</td></tr>
+      <tr><td class="node-id">EMPTYCHECK / IDLESTOP</td><td class="loc">worker_pool.py:run_dispatch_loop()</td><td class="desc">The dispatch loop doesn't run forever — after <code>idle_stop_after</code> (2) consecutive empty cycles, it stops. This is what lets the demo scripts terminate cleanly instead of polling an empty queue forever.</td></tr>
+      <tr><td class="node-id">TRY / MAXCHECK</td><td class="loc">worker_pool.py:handle_one()</td><td class="desc">Every job failure increments a Redis-backed attempt counter (<code>INFLIGHT_HASH</code>) — this survives across dispatch cycles and even worker restarts, unlike an in-memory counter would.</td></tr>
+      <tr><td class="node-id">TODLQ vs. REENQUEUE</td><td class="loc">worker_pool.py:handle_one()</td><td class="desc">The exact same failure either gets one more chance (re-enqueued for a later cycle) or gets permanently routed to the DLQ — the only difference is whether <code>attempts &gt;= MAX_ATTEMPTS</code>.</td></tr>
+    </table>
+
+    <div class="section-head"><h2>Concrete example paths</h2></div>
+    <div class="scenario-card">
+      <h4>500-job burst, zero consumers running</h4>
+      <p>Every <code>enqueue()</code> call returns in under a millisecond regardless of how deep the (never-drained) queue gets — proving the producer never waits on the consumer.</p>
+      <span class="path">500× [enqueue() → returns immediately, LPUSH is O(1)]</span>
+    </div>
+    <div class="scenario-card">
+      <h4>Bursty load, adaptive scaling</h4>
+      <p>Depth jumps from 5 to 1035 across cycles; the dispatcher spins up 8 workers for the deep cycle, then scales back to 2 workers once the queue drains to 35 — all driven by the same formula.</p>
+      <span class="path">CYCLE(depth=1035) → WORKERCALC(8) → CYCLE(depth=35) → WORKERCALC(2)</span>
+    </div>
+    <div class="scenario-card">
+      <h4>A poisoned job that always fails</h4>
+      <p>Fails attempt 1 → re-enqueued. Fails attempt 2 → re-enqueued again. Fails attempt 3 → MAX_ATTEMPTS reached → routed to DLQ, attempt counter cleared.</p>
+      <span class="path">TRY(fail) → INCATTEMPT(1) → REENQUEUE → TRY(fail) → INCATTEMPT(2) → REENQUEUE → TRY(fail) → INCATTEMPT(3) → MAXCHECK(True) → TODLQ</span>
+    </div>
+    <div class="scenario-card">
+      <h4>Replaying the DLQ</h4>
+      <p><code>replay_dlq()</code> moves poisoned jobs back onto the main queue for another attempt — since they're genuinely unrecoverable, they land back in the DLQ again, proving replay retries rather than magically fixing anything.</p>
+      <span class="path">REPLAY: RPOP(job) → RESTORE → LPUSH to main queue → [dispatched again] → TODLQ (same outcome)</span>
+    </div>
+
+    <div class="footer-nav">
+      <a href="index.html">← back to all flowcharts</a>
+      <a href="https://github.com/abhi32dev/ai-infrastructure-platform-2/tree/main/06-backpressure-dispatch" target="_blank" rel="noopener">06-backpressure-dispatch source ↗</a>
+    </div>
+  </div>
+</body>
+</html>

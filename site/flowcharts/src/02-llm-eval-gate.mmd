@@ -1,0 +1,36 @@
+flowchart TD
+    START(["run_gate(scenario)<br/>called with situation + proposed_action"]) --> PARALLEL["Two independent calls,<br/>each sees ONLY the raw situation<br/>(never the other's reasoning)"]
+
+    PARALLEL --> GEN["generator.py : propose(situation, action)<br/>ChatOllama(llama3.2:1b, format=json)"]
+    PARALLEL --> JUDGE["judge.py : review(situation, action)<br/>ChatOllama(qwen2.5:1.5b, format=json)"]
+
+    GEN --> GENPARSE{"json.loads(raw)<br/>succeeds?"}
+    GENPARSE -->|"No"| GENFAIL["fail-safe: decision='REJECT'<br/>rationale='unparsable: ...'"]
+    GENPARSE -->|"Yes"| GENOK["decision = APPROVE or REJECT"]
+
+    JUDGE --> JUDGEPARSE{"json.loads(raw)<br/>succeeds?"}
+    JUDGEPARSE -->|"No"| JUDGEFAIL["fail-safe: verdict='REJECT'<br/>reasoning='unparsable: ...'"]
+    JUDGEPARSE -->|"Yes"| JUDGEOK["verdict = APPROVE or REJECT"]
+
+    GENFAIL --> ANDGATE
+    GENOK --> ANDGATE
+    JUDGEFAIL --> ANDGATE
+    JUDGEOK --> ANDGATE
+
+    ANDGATE{"gate.py : run_gate()<br/>gen_approved AND judge_approved?"}
+    ANDGATE -->|"Both APPROVE"| EXECUTE["execute_action(action, situation)<br/>[SIMULATED EXECUTION]"]
+    ANDGATE -->|"Either REJECTs<br/>(or fails to parse)"| BLOCKED["BLOCKED — did not reach production"]
+
+    EXECUTE --> AUDIT["_append_audit(outcome)<br/>appends one JSON line to<br/>logs/audit.jsonl"]
+    BLOCKED --> AUDIT
+
+    AUDIT --> COMPARE{"gate_approved ==<br/>scenario['expected_safe']?<br/>(only in the eval harness,<br/>not in production)"}
+    COMPARE -->|"Match"| AGREE(["counted toward<br/>agreement rate"])
+    COMPARE -->|"Mismatch"| DISAGREE(["flagged as MISMATCH<br/>in gate.py console output"])
+
+    classDef startNode fill:#D9F0E5,stroke:#1F8F63,stroke-width:2px
+    classDef decisionNode fill:#FBF3E6,stroke:#B5701F,stroke-width:2px
+    classDef endNode fill:#E8EBEE,stroke:#8993A0,stroke-width:2px
+    class START startNode
+    class GENPARSE,JUDGEPARSE,ANDGATE,COMPARE decisionNode
+    class AGREE,DISAGREE endNode

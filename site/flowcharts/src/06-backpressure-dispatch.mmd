@@ -1,0 +1,47 @@
+flowchart TD
+    START(["run_dispatch_loop(max_cycles)"]) --> CYCLE["run_dispatch_cycle(client)"]
+
+    CYCLE --> DEPTH["depth = queue_depth(client)<br/>LLEN on the Redis list"]
+    DEPTH --> WORKERCALC["worker_pool.py : desired_worker_count(depth)<br/>max(MIN, min(MAX, depth // SCALE_DIVISOR + 1))"]
+    WORKERCALC --> DRAIN["dequeue up to max_jobs_this_cycle<br/>jobs via BRPOP"]
+
+    DRAIN --> EMPTYCHECK{"jobs list<br/>is empty?"}
+    EMPTYCHECK -->|"Yes"| IDLECOUNT["idle_cycles += 1"]
+    IDLECOUNT --> IDLESTOP{"idle_cycles &gt;=<br/>idle_stop_after (2)?"}
+    IDLESTOP -->|"Yes"| STOPLOOP(["dispatcher stops"])
+    IDLESTOP -->|"No"| CYCLE
+
+    EMPTYCHECK -->|"No"| RESETIDLE["idle_cycles = 0"] --> POOL["ThreadPoolExecutor(worker_count)<br/>.map(handle_one, jobs)"]
+
+    POOL --> PERJOB["handle_one(client, job)<br/>— runs once per job, in parallel"]
+    PERJOB --> TRY{"process_job(client, job)<br/>raises?"}
+
+    TRY -->|"No (success)"| CLEARATTEMPT["clear_attempts(client, job_id)<br/>HDEL from INFLIGHT_HASH"]
+    CLEARATTEMPT --> OK(["result: 'processed job_id=...'"])
+
+    TRY -->|"Yes (job.force_fail=True,<br/>or any real exception)"| INCATTEMPT["attempts = increment_attempts(client, job_id)<br/>HINCRBY on INFLIGHT_HASH"]
+    INCATTEMPT --> MAXCHECK{"attempts &gt;=<br/>MAX_ATTEMPTS (3)?"}
+    MAXCHECK -->|"Yes"| TODLQ["send_to_dlq(client, job, reason)<br/>LPUSH to DLQ list<br/>clear_attempts(client, job_id)"]
+    TODLQ --> DLQRESULT(["result: 'DLQ job_id=...'"])
+    MAXCHECK -->|"No"| REENQUEUE["enqueue(client, job)<br/>LPUSH back onto main queue<br/>for a later cycle to retry"]
+    REENQUEUE --> RETRYRESULT(["result: 'retry-scheduled job_id=...'"])
+
+    OK --> CYCLE
+    DLQRESULT --> CYCLE
+    RETRYRESULT --> CYCLE
+
+    subgraph REPLAY["Separate flow: replay_dlq(client)"]
+    RSTART(["replay_dlq() called"]) --> RPOP{"RPOP from DLQ<br/>returns something?"}
+    RPOP -->|"Yes"| RESTORE["strip dlq_reason,<br/>add replayed=True,<br/>LPUSH back to main queue"]
+    RESTORE --> RPOP
+    RPOP -->|"No (empty)"| RDONE(["return count replayed"])
+    end
+
+    classDef startNode fill:#D9F0E5,stroke:#1F8F63,stroke-width:2px
+    classDef decisionNode fill:#FBF3E6,stroke:#B5701F,stroke-width:2px
+    classDef endNode fill:#E8EBEE,stroke:#8993A0,stroke-width:2px
+    classDef warnNode fill:#F7DEDA,stroke:#C23B2E,stroke-width:2px
+    class START,RSTART startNode
+    class EMPTYCHECK,IDLESTOP,TRY,MAXCHECK,RPOP decisionNode
+    class OK,STOPLOOP,RDONE endNode
+    class DLQRESULT warnNode

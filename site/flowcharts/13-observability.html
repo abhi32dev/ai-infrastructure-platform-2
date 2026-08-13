@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flowchart — Observability Stack</title>
+<link rel="stylesheet" href="../vendor/flowchart.css">
+</head>
+<body>
+  <div class="topbar">
+    <div class="topbar-inner">
+      <span class="mono" style="font-size:12.5px;color:var(--text-tertiary)">SVC-13 · OBSERVABILITY STACK</span>
+      <div class="topbar-links">
+        <a href="index.html">← all flowcharts</a>
+        <a href="../index.html">portfolio home</a>
+        <a href="https://github.com/abhi32dev/ai-infrastructure-platform-2/tree/main/13-observability" target="_blank" rel="noopener">view source ↗</a>
+      </div>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <section class="hero">
+      <div class="eyebrow">Logic flow · 13-observability/</div>
+      <h1>Where every span opens, where every metric increments</h1>
+      <p class="hero-sub">One traced query flows through three nested spans (retrieval → context_assembly → generation) inside one parent span, with Prometheus counters firing at specific, deliberate points — including the fallback path when retrieval finds nothing relevant.</p>
+    </section>
+
+    <div class="section-head"><h2>Legend</h2></div>
+    <div class="legend">
+      <div class="legend-item"><span class="legend-swatch start"></span> Entry point / start</div>
+      <div class="legend-item"><span class="legend-swatch process"></span> Function call (does work)</div>
+      <div class="legend-item"><span class="legend-swatch decision"></span> Real conditional in the code</div>
+      <div class="legend-item"><span class="legend-swatch terminal"></span> Output / end state</div>
+    </div>
+
+    <div class="section-head"><h2>Full logic flow</h2></div>
+    <div class="diagram-card">
+      <img class="diagram-svg" src="svg/13-observability.svg" alt="Flowchart: Observability Stack logic flow" loading="lazy">
+    </div>
+
+    <div class="section-head"><h2>Node-by-node reference</h2></div>
+    <table class="ref-table">
+      <tr><th>Node</th><th>Location</th><th>What it does</th></tr>
+      <tr><td class="node-id">ANYSCORE / FALLBACK</td><td class="loc">traced_pipeline.py:retrieve()</td><td class="desc">A query with zero keyword overlap against the whole corpus still returns something — the fallback picks the single highest-scoring entry (even at score=0) rather than returning nothing to downstream context assembly.</td></tr>
+      <tr><td class="node-id">EMPTYCTX</td><td class="loc">traced_pipeline.py:assemble_context()</td><td class="desc">An empty chunk list produces an empty string context, not an exception — <code>"\n\n---\n\n".join([])</code> is just <code>""</code>.</td></tr>
+      <tr><td class="node-id">EXCEPT / SPANERR</td><td class="loc">traced_pipeline.py:run_traced_query()</td><td class="desc">The whole pipeline is wrapped in try/except specifically to set <code>span.set_status(Status.ERROR, str(e))</code> AND increment the <code>outcome='error'</code> counter before re-raising — the exception still propagates, but not before telemetry captures it.</td></tr>
+      <tr><td class="node-id">FINALLY</td><td class="loc">traced_pipeline.py:run_traced_query()</td><td class="desc">Runs regardless of success or failure — this is what guarantees <code>REQUEST_LATENCY</code> gets an observation and the parent span gets its final <code>total_latency_sec</code> attribute even when something upstream raised.</td></tr>
+    </table>
+
+    <div class="section-head"><h2>Concrete example paths</h2></div>
+    <div class="scenario-card">
+      <h4>A normal successful query</h4>
+      <p>All three child spans open and close normally inside the parent span; the parent's status is set to OK and the success counter increments.</p>
+      <span class="path">SPAN1 → RETRIEVEFN → ASSEMBLEFN → GENFN → EXCEPT(No) → SPANOK → FINALLY → RETURNRESULT</span>
+    </div>
+    <div class="scenario-card">
+      <h4>A query with no keyword matches at all</h4>
+      <p>Retrieval still returns exactly one chunk (the fallback), so context assembly and generation proceed normally rather than failing on empty input.</p>
+      <span class="path">RETRIEVEFN → KEYWORDMATCH → ANYSCORE(No) → FALLBACK(1 entry) → SPANATTR1 → ASSEMBLEFN</span>
+    </div>
+    <div class="scenario-card">
+      <h4>Generation raises an exception (forced in a test)</h4>
+      <p>The exception is caught, the span is marked ERROR, the error counter increments — proven directly by forcing a real exception and checking the metric moved, not just trusting the try/except by inspection.</p>
+      <span class="path">GENFN → LLMINVOKE(raises) → EXCEPT(Yes) → SPANERR → FINALLY → exception re-raised</span>
+    </div>
+
+    <div class="footer-nav">
+      <a href="index.html">← back to all flowcharts</a>
+      <a href="https://github.com/abhi32dev/ai-infrastructure-platform-2/tree/main/13-observability" target="_blank" rel="noopener">13-observability source ↗</a>
+    </div>
+  </div>
+</body>
+</html>

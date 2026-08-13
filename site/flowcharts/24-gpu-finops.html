@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flowchart — GPU Cost Governance</title>
+<link rel="stylesheet" href="../vendor/flowchart.css">
+</head>
+<body>
+  <div class="topbar">
+    <div class="topbar-inner">
+      <span class="mono" style="font-size:12.5px;color:var(--text-tertiary)">SVC-24 · GPU COST GOVERNANCE</span>
+      <div class="topbar-links">
+        <a href="index.html">← all flowcharts</a>
+        <a href="../index.html">portfolio home</a>
+        <a href="https://github.com/abhi32dev/ai-infrastructure-platform-2/tree/main/24-gpu-finops" target="_blank" rel="noopener">view source ↗</a>
+      </div>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <section class="hero">
+      <div class="eyebrow">Logic flow · 24-gpu-finops/</div>
+      <h1>How a sustained idle window gets detected, without false-alarming on normal training noise</h1>
+      <p class="hero-sub">The core logic of this project is one careful distinction: a MOMENTARY utilization dip (normal during real training) must never trigger a waste alert, but a SUSTAINED idle period (a job that finished and was never torn down) always should. The diagram traces exactly how that line gets drawn.</p>
+    </section>
+
+    <div class="section-head"><h2>Legend</h2></div>
+    <div class="legend">
+      <div class="legend-item"><span class="legend-swatch start"></span> Entry point / start</div>
+      <div class="legend-item"><span class="legend-swatch process"></span> Function call (does work)</div>
+      <div class="legend-item"><span class="legend-swatch decision"></span> Real conditional in the code</div>
+      <div class="legend-item"><span class="legend-swatch terminal"></span> Output / end state</div>
+    </div>
+
+    <div class="section-head"><h2>Full logic flow</h2></div>
+    <div class="diagram-card">
+      <img class="diagram-svg" src="svg/24-gpu-finops.svg" alt="Flowchart: GPU Cost Governance logic flow" loading="lazy">
+    </div>
+
+    <div class="section-head"><h2>Node-by-node reference</h2></div>
+    <table class="ref-table">
+      <tr><th>Node</th><th>Location</th><th>What it does</th></tr>
+      <tr><td class="node-id">RATEFOUND</td><td class="loc">cost_engine.py:cost_per_point()</td><td class="desc">Looks up the GPU type in a rate-card dict. An unrecognized GPU type raises <code>KeyError</code> deliberately — never silently defaults to $0, which would corrupt the whole cost report without any visible error.</td></tr>
+      <tr><td class="node-id">POINTLOOP / RUNENDCHECK</td><td class="loc">cost_engine.py:find_sustained_idle_windows()</td><td class="desc">Builds up a run of consecutive below-threshold readings. The run only counts as real waste if it's at least <code>SUSTAINED_IDLE_POINTS</code> (6 points = 30 minutes) long — anything shorter is discarded as normal noise, never recorded.</td></tr>
+      <tr><td class="node-id">ALERTCHECK</td><td class="loc">cost_engine.py:analyze_instance()</td><td class="desc"><code>idle_cost &gt;= ALERT_IDLE_COST_THRESHOLD ($5.00)</code> — a dollar-based alert threshold, not a percentage, so it scales sensibly across GPU types with very different hourly rates.</td></tr>
+    </table>
+
+    <div class="section-head"><h2>Concrete example paths</h2></div>
+    <div class="scenario-card">
+      <h4>A genuinely busy instance</h4>
+      <p>Utilization stays high the entire simulated window — the idle-window scan never accumulates a run long enough to count as waste.</p>
+      <span class="path">POINTLOOP(never below threshold) → IDLECOST(0) → ALERTCHECK(No) → NOALERT — measured: gpu-001, 0% idle</span>
+    </div>
+    <div class="scenario-card">
+      <h4>Job finishes, instance left running idle (the real waste pattern)</h4>
+      <p>High utilization for the first 40% of the window, then a long idle tail after the training job finished — correctly detected as a single sustained window, not dismissed as noise.</p>
+      <span class="path">POINTLOOP(long run below threshold) → RUNENDCHECK(&gt;=6 points → Yes) → RECORDWINDOW → IDLECOST($10.96) → ALERTCHECK(Yes) → RAISEALERT — measured: gpu-002, 59.7% idle</span>
+    </div>
+    <div class="scenario-card">
+      <h4>A momentary dip during real training (the negative case)</h4>
+      <p>A brief utilization dip shorter than the sustained-window requirement — correctly discarded, proving the detector doesn't false-alarm on normal training noise like data-loading stalls.</p>
+      <span class="path">POINTLOOP(short dip, &lt;6 points) → RUNENDCHECK(No) → DISCARDRUN — no alert, no cost impact</span>
+    </div>
+
+    <div class="footer-nav">
+      <a href="index.html">← back to all flowcharts</a>
+      <a href="https://github.com/abhi32dev/ai-infrastructure-platform-2/tree/main/24-gpu-finops" target="_blank" rel="noopener">24-gpu-finops source ↗</a>
+    </div>
+  </div>
+</body>
+</html>

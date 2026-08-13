@@ -1,0 +1,38 @@
+flowchart TD
+    START(["run_config(parallel_slots)<br/>called once per configuration"]) --> STARTSERVER["server_manager.py : start_server(parallel_slots)<br/>subprocess.Popen(['llama-server',<br/>'--parallel', str(parallel_slots), ...])"]
+
+    STARTSERVER --> WAITLOOP{"_wait_for_ready():<br/>poll GET /health<br/>every 0.5s"}
+    WAITLOOP --> PROCALIVE{"proc.poll()<br/>is not None?<br/>(process already exited)"}
+    PROCALIVE -->|"Yes"| CRASHERR(["raise RuntimeError:<br/>'exited before ready'"])
+    PROCALIVE -->|"No"| HEALTHPOLL{"GET /health<br/>returns 200?"}
+    HEALTHPOLL -->|"No"| TIMEOUTCHECK{"elapsed &gt;<br/>timeout (60s)?"}
+    TIMEOUTCHECK -->|"Yes"| TIMEOUTERR(["raise TimeoutError"])
+    TIMEOUTCHECK -->|"No"| WAITLOOP
+    HEALTHPOLL -->|"Yes"| READY["server ready"]
+
+    READY --> BENCHMARK["run_concurrent_benchmark(n_requests=8)"]
+    BENCHMARK --> POOL["ThreadPoolExecutor(max_workers=n_requests)<br/>.map(send_one_request, range(8))<br/>— all 8 requests fired ~simultaneously"]
+
+    POOL --> PERREQ{"each of the 8 threads,<br/>independently"}
+    PERREQ --> POSTCALL["httpx.post('/completion',<br/>{prompt, n_predict: MAX_TOKENS})"]
+    POSTCALL --> SERVERSIDE["llama-server internally:<br/>--parallel N slots means N requests<br/>can be mid-generation simultaneously,<br/>sharing compute via continuous batching"]
+    SERVERSIDE --> RESPONSE["response includes<br/>timings.predicted_n (real token count)"]
+    RESPONSE --> PERREQ
+
+    PERREQ -->|"all 8 threads done"| AGGREGATE["total_tokens = sum(all results)<br/>total_wall_time = time.time() - start<br/>aggregate_tokens_per_sec = total/time"]
+
+    AGGREGATE --> STOPSERVER["stop_server(proc)<br/>proc.terminate(), wait up to 10s,<br/>then proc.kill() if still alive"]
+    STOPSERVER --> RESULT(["return {n_requests, total_tokens,<br/>aggregate_tokens_per_sec,<br/>p50/p99 latency}"])
+
+    RESULT -.->|"run_demo.py compares TWO runs"| COMPARE{"parallel=1 result vs.<br/>parallel=4 result:<br/>which has higher<br/>tokens_per_sec?"}
+    COMPARE -->|"parallel=4 wins<br/>(measured: 2.09-2.27x)"| BATCHWINS(["continuous batching<br/>speedup confirmed"])
+    COMPARE -->|"real finding: at low n<br/>or with server-lifecycle<br/>churn, this can flip"| NOISY(["flaky at small n /<br/>rapid server restarts —<br/>documented, tests restructured<br/>to 2 clean sequential runs"])
+
+    classDef startNode fill:#D9F0E5,stroke:#1F8F63,stroke-width:2px
+    classDef decisionNode fill:#FBF3E6,stroke:#B5701F,stroke-width:2px
+    classDef endNode fill:#E8EBEE,stroke:#8993A0,stroke-width:2px
+    classDef warnNode fill:#F7DEDA,stroke:#C23B2E,stroke-width:2px
+    class START startNode
+    class PROCALIVE,HEALTHPOLL,TIMEOUTCHECK,PERREQ,COMPARE decisionNode
+    class RESULT,BATCHWINS endNode
+    class CRASHERR,TIMEOUTERR,NOISY warnNode

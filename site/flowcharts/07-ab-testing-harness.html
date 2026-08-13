@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flowchart — A/B Testing & p-Value Harness</title>
+<link rel="stylesheet" href="../vendor/flowchart.css">
+</head>
+<body>
+  <div class="topbar">
+    <div class="topbar-inner">
+      <span class="mono" style="font-size:12.5px;color:var(--text-tertiary)">SVC-07 · A/B TESTING & P-VALUE HARNESS</span>
+      <div class="topbar-links">
+        <a href="index.html">← all flowcharts</a>
+        <a href="../index.html">portfolio home</a>
+        <a href="https://github.com/abhi32dev/ai-infrastructure-platform-2/tree/main/07-ab-testing-harness" target="_blank" rel="noopener">view source ↗</a>
+      </div>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <section class="hero">
+      <div class="eyebrow">Logic flow · 07-ab-testing-harness/</div>
+      <h1>Which statistical test runs, and how significance gets decided</h1>
+      <p class="hero-sub">Two test families exist for a reason — binary outcomes need a two-proportion z-test, continuous measurements need Welch’s t-test. The diagram shows how each computes its p-value, and the one line (<code>bool(p_value &lt; 0.05)</code>) that decides everything downstream.</p>
+    </section>
+
+    <div class="section-head"><h2>Legend</h2></div>
+    <div class="legend">
+      <div class="legend-item"><span class="legend-swatch start"></span> Entry point / start</div>
+      <div class="legend-item"><span class="legend-swatch process"></span> Function call (does work)</div>
+      <div class="legend-item"><span class="legend-swatch decision"></span> Real conditional in the code</div>
+      <div class="legend-item"><span class="legend-swatch terminal"></span> Output / end state</div>
+    </div>
+
+    <div class="section-head"><h2>Full logic flow</h2></div>
+    <div class="diagram-card">
+      <img class="diagram-svg" src="svg/07-ab-testing-harness.svg" alt="Flowchart: A/B Testing & p-Value Harness logic flow" loading="lazy">
+    </div>
+
+    <div class="section-head"><h2>Node-by-node reference</h2></div>
+    <table class="ref-table">
+      <tr><th>Node</th><th>Location</th><th>What it does</th></tr>
+      <tr><td class="node-id">DATATYPE</td><td class="loc">stats_harness.py (caller's choice)</td><td class="desc">Not an automatic branch in the code — the caller picks which function to call based on their data shape. Binary (converted/didn't) → <code>two_proportion_z_test()</code>; continuous (a measurement) → <code>welch_t_test()</code>.</td></tr>
+      <tr><td class="node-id">ZCALC</td><td class="loc">stats_harness.py:two_proportion_z_test()</td><td class="desc">Pools both arms' successes to compute a shared standard error, then a z-statistic — the standard formula for comparing two proportions.</td></tr>
+      <tr><td class="node-id">TCALC</td><td class="loc">stats_harness.py:welch_t_test()</td><td class="desc">Delegates to <code>scipy.stats.ttest_ind(..., equal_var=False)</code> — the <code>equal_var=False</code> is what makes this Welch's test, not Student's, correctly not assuming the two groups have equal variance.</td></tr>
+      <tr><td class="node-id">SIGCHECK</td><td class="loc">stats_harness.py (both functions)</td><td class="desc"><code>bool(p_value &lt; 0.05)</code> — the explicit <code>bool()</code> wrapper exists because a bare numpy bool caused a real test failure (<code>np.True_ is True</code> evaluates False) before this fix.</td></tr>
+      <tr><td class="node-id">EDGECASE</td><td class="loc">stats_harness.py:welch_t_test()</td><td class="desc">Zero-variance identical samples make the t-test's denominator zero, producing <code>nan</code>. Because <code>nan &lt; 0.05</code> evaluates to <code>False</code> in Python, this degrades safely to "not significant" rather than crashing or falsely claiming an effect.</td></tr>
+    </table>
+
+    <div class="section-head"><h2>Concrete example paths</h2></div>
+    <div class="scenario-card">
+      <h4>Seeded recommendation lift at real scale</h4>
+      <p>A true 7.4% relative lift baked into 50,000 simulated users per arm is correctly recovered and called significant (p=0.00002) — the z-test doing exactly what it's for.</p>
+      <span class="path">DATATYPE(Binary) → ZTEST → ZCALC → ZP(0.00002) → SIGCHECK(True) → SIGRESULT</span>
+    </div>
+    <div class="scenario-card">
+      <h4>A 56%-looking latency difference that isn't real</h4>
+      <p>8 samples per model, one cold-start outlier dominating each — the t-test correctly refuses to call it significant (p=0.499) despite the raw numbers looking dramatic.</p>
+      <span class="path">DATATYPE(Continuous) → TTEST → TCALC → TP(0.499) → SIGCHECK(False) → NOTSIGRESULT</span>
+    </div>
+    <div class="scenario-card">
+      <h4>Identical, zero-variance samples</h4>
+      <p>An edge case that could crash a naive implementation instead safely resolves to "not significant" via Python's nan comparison semantics.</p>
+      <span class="path">TTEST → TCALC(nan) → EDGECASE(Yes) → NANSAFE</span>
+    </div>
+
+    <div class="footer-nav">
+      <a href="index.html">← back to all flowcharts</a>
+      <a href="https://github.com/abhi32dev/ai-infrastructure-platform-2/tree/main/07-ab-testing-harness" target="_blank" rel="noopener">07-ab-testing-harness source ↗</a>
+    </div>
+  </div>
+</body>
+</html>

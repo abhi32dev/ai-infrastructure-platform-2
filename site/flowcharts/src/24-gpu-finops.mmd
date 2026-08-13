@@ -1,0 +1,42 @@
+flowchart TD
+    START(["cost_engine.py : run_analysis(telemetry)"]) --> GROUPBY["group telemetry rows<br/>by instance_id<br/>(defaultdict(list))"]
+
+    GROUPBY --> PERINSTANCE{"for each instance,<br/>analyze_instance(id, points)"}
+
+    PERINSTANCE --> RATELOOKUP["cost_per_point(gpu_type):<br/>GPU_HOURLY_RATES[gpu_type] / POINTS_PER_HOUR"]
+    RATELOOKUP --> RATEFOUND{"gpu_type IS in<br/>GPU_HOURLY_RATES dict?"}
+    RATEFOUND -->|"No (unknown GPU type)"| RAISEKEY(["raise KeyError —<br/>deliberately NOT a silent<br/>default cost of $0"])
+    RATEFOUND -->|"Yes"| TOTALCOST["total_cost = len(points) * per_point_cost"]
+
+    TOTALCOST --> IDLESCAN["find_sustained_idle_windows(points):<br/>scan points in order,<br/>build up 'current_run'"]
+
+    IDLESCAN --> POINTLOOP{"for each point:<br/>utilization_pct &lt;<br/>IDLE_THRESHOLD (15%)?"}
+    POINTLOOP -->|"Yes (below threshold)"| EXTENDRUN["current_run.append(point)"]
+    EXTENDRUN --> POINTLOOP
+    POINTLOOP -->|"No (utilization recovered)"| RUNENDCHECK{"len(current_run) &gt;=<br/>SUSTAINED_IDLE_POINTS<br/>(30min / 5min = 6 points)?"}
+
+    RUNENDCHECK -->|"Yes → REAL waste,<br/>not a momentary dip"| RECORDWINDOW["windows.append(current_run)<br/>this run counts toward idle_cost"]
+    RUNENDCHECK -->|"No → too short,<br/>just noise"| DISCARDRUN["current_run discarded,<br/>does NOT count as waste<br/>(this is the negative-case<br/>test: a short dip during<br/>real training must not<br/>trigger a false alert)"]
+
+    RECORDWINDOW --> RESETRUN["current_run = []"]
+    DISCARDRUN --> RESETRUN
+    RESETRUN --> POINTLOOP
+    POINTLOOP -->|"all points scanned"| IDLECOST["idle_cost = sum of all<br/>recorded windows' point counts<br/>× per_point_cost"]
+
+    IDLECOST --> ALERTCHECK{"idle_cost &gt;=<br/>ALERT_IDLE_COST_THRESHOLD<br/>($5.00)?"}
+    ALERTCHECK -->|"Yes"| RAISEALERT["report.alert = True<br/>(measured: gpu-002,<br/>$10.96 idle, 59.7% idle time)"]
+    ALERTCHECK -->|"No"| NOALERT["report.alert = False<br/>(measured: gpu-001/003/004,<br/>all $0.00 idle)"]
+
+    RAISEALERT --> PERINSTANCE
+    NOALERT --> PERINSTANCE
+    PERINSTANCE -->|"all instances analyzed"| ROLLUP["roll up by team:<br/>sum total_cost_usd and<br/>idle_cost_usd per team"]
+    ROLLUP --> FINALREPORT(["{instances, by_team,<br/>total_cost, total_idle_cost,<br/>alerts: [instances where<br/>alert==True]}"])
+
+    classDef startNode fill:#D9F0E5,stroke:#1F8F63,stroke-width:2px
+    classDef decisionNode fill:#FBF3E6,stroke:#B5701F,stroke-width:2px
+    classDef endNode fill:#E8EBEE,stroke:#8993A0,stroke-width:2px
+    classDef warnNode fill:#F7DEDA,stroke:#C23B2E,stroke-width:2px
+    class START startNode
+    class RATEFOUND,POINTLOOP,RUNENDCHECK,ALERTCHECK decisionNode
+    class FINALREPORT,NOALERT endNode
+    class RAISEKEY,RAISEALERT warnNode

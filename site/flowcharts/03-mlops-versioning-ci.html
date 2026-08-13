@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flowchart — MLflow Versioning + CI Gate</title>
+<link rel="stylesheet" href="../vendor/flowchart.css">
+</head>
+<body>
+  <div class="topbar">
+    <div class="topbar-inner">
+      <span class="mono" style="font-size:12.5px;color:var(--text-tertiary)">SVC-03 · MLFLOW VERSIONING + CI GATE</span>
+      <div class="topbar-links">
+        <a href="index.html">← all flowcharts</a>
+        <a href="../index.html">portfolio home</a>
+        <a href="https://github.com/abhi32dev/ai-infrastructure-platform-2/tree/main/03-mlops-versioning-ci" target="_blank" rel="noopener">view source ↗</a>
+      </div>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <section class="hero">
+      <div class="eyebrow">Logic flow · 03-mlops-versioning-ci/</div>
+      <h1>How the regression gate decides pass or fail</h1>
+      <p class="hero-sub"><code>regression_gate.py:main()</code> is the single entry point CI calls. It always runs a fresh evaluation first, then branches on whether this is a baseline-update call or a real regression check — the diagram traces every exit code and what triggers it.</p>
+    </section>
+
+    <div class="section-head"><h2>Legend</h2></div>
+    <div class="legend">
+      <div class="legend-item"><span class="legend-swatch start"></span> Entry point / start</div>
+      <div class="legend-item"><span class="legend-swatch process"></span> Function call (does work)</div>
+      <div class="legend-item"><span class="legend-swatch decision"></span> Real conditional in the code</div>
+      <div class="legend-item"><span class="legend-swatch terminal"></span> Output / end state</div>
+    </div>
+
+    <div class="section-head"><h2>Full logic flow</h2></div>
+    <div class="diagram-card">
+      <img class="diagram-svg" src="svg/03-mlops-versioning-ci.svg" alt="Flowchart: MLflow Versioning + CI Gate logic flow" loading="lazy">
+    </div>
+
+    <div class="section-head"><h2>Node-by-node reference</h2></div>
+    <table class="ref-table">
+      <tr><th>Node</th><th>Location</th><th>What it does</th></tr>
+      <tr><td class="node-id">RUNEVAL</td><td class="loc">eval_harness.py:evaluate_and_log()</td><td class="desc">Runs unconditionally, every single invocation — regardless of what happens next, MLflow gets a new logged run with this version's params/metrics.</td></tr>
+      <tr><td class="node-id">ISUPDATE</td><td class="loc">regression_gate.py:main()</td><td class="desc">Checks <code>'--update-baseline' in sys.argv</code>. This is the one branch a human must deliberately trigger — the baseline never auto-updates on a green run, specifically to avoid slow regressions ratcheting the baseline down unnoticed.</td></tr>
+      <tr><td class="node-id">BASEEXISTS</td><td class="loc">regression_gate.py:load_baseline()</td><td class="desc">First-ever run has no <code>baseline_metrics.json</code> yet — the code treats that as "establish it now" rather than crashing.</td></tr>
+      <tr><td class="node-id">REGCHECK</td><td class="loc">regression_gate.py:main()</td><td class="desc">The actual comparison: <code>summary.agreement_rate &lt; baseline.agreement_rate - REGRESSION_TOLERANCE</code>. With tolerance=0.0, this is a strict <code>&lt;</code> — exactly equal or better always passes.</td></tr>
+    </table>
+
+    <div class="section-head"><h2>Concrete example paths</h2></div>
+    <div class="scenario-card">
+      <h4>First run ever, no baseline file</h4>
+      <p>Nothing to compare against, so this run's result becomes the baseline automatically — the only case where a baseline is written without <code>--update-baseline</code>.</p>
+      <span class="path">RUNEVAL → BASEEXISTS(No) → FIRSTRUN → EXIT0B</span>
+    </div>
+    <div class="scenario-card">
+      <h4>A prompt change makes things worse</h4>
+      <p>v1 scores 0.33 vs. the committed v2 baseline of 0.83 — a real regression, correctly caught and blocking the merge.</p>
+      <span class="path">RUNEVAL → BASEEXISTS(Yes) → REGCHECK(0.33 &lt; 0.83 → True) → PRINTFAIL → EXIT1</span>
+    </div>
+    <div class="scenario-card">
+      <h4>Deliberately promoting an improvement</h4>
+      <p>An engineer runs with <code>--update-baseline</code> after confirming a real improvement — the new, better number becomes the committed baseline for future CI runs.</p>
+      <span class="path">RUNEVAL → ISUPDATE(Yes) → WRITEBASE → EXIT0A</span>
+    </div>
+
+    <div class="footer-nav">
+      <a href="index.html">← back to all flowcharts</a>
+      <a href="https://github.com/abhi32dev/ai-infrastructure-platform-2/tree/main/03-mlops-versioning-ci" target="_blank" rel="noopener">03-mlops-versioning-ci source ↗</a>
+    </div>
+  </div>
+</body>
+</html>

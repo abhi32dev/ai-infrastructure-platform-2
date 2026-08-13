@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flowchart — High-Perf Inference Serving</title>
+<link rel="stylesheet" href="../vendor/flowchart.css">
+</head>
+<body>
+  <div class="topbar">
+    <div class="topbar-inner">
+      <span class="mono" style="font-size:12.5px;color:var(--text-tertiary)">SVC-17 · HIGH-PERF INFERENCE SERVING</span>
+      <div class="topbar-links">
+        <a href="index.html">← all flowcharts</a>
+        <a href="../index.html">portfolio home</a>
+        <a href="https://github.com/abhi32dev/ai-infrastructure-platform-2/tree/main/17-inference-serving" target="_blank" rel="noopener">view source ↗</a>
+      </div>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <section class="hero">
+      <div class="eyebrow">Logic flow · 17-inference-serving/</div>
+      <h1>How continuous batching gets measured, and the flaky-test bug found along the way</h1>
+      <p class="hero-sub">The diagram follows one full benchmark run — starting the server, waiting for readiness, firing 8 concurrent requests, and the real methodology bug discovered when comparing two configurations.</p>
+    </section>
+
+    <div class="section-head"><h2>Legend</h2></div>
+    <div class="legend">
+      <div class="legend-item"><span class="legend-swatch start"></span> Entry point / start</div>
+      <div class="legend-item"><span class="legend-swatch process"></span> Function call (does work)</div>
+      <div class="legend-item"><span class="legend-swatch decision"></span> Real conditional in the code</div>
+      <div class="legend-item"><span class="legend-swatch terminal"></span> Output / end state</div>
+    </div>
+
+    <div class="section-head"><h2>Full logic flow</h2></div>
+    <div class="diagram-card">
+      <img class="diagram-svg" src="svg/17-inference-serving.svg" alt="Flowchart: High-Perf Inference Serving logic flow" loading="lazy">
+    </div>
+
+    <div class="section-head"><h2>Node-by-node reference</h2></div>
+    <table class="ref-table">
+      <tr><th>Node</th><th>Location</th><th>What it does</th></tr>
+      <tr><td class="node-id">WAITLOOP</td><td class="loc">server_manager.py:_wait_for_ready()</td><td class="desc">Polls <code>GET /health</code> every 0.5s, with two distinct failure modes handled separately: the process exiting early (a real crash) versus simply taking longer than the 60s timeout.</td></tr>
+      <tr><td class="node-id">POOL</td><td class="loc">benchmark.py:run_concurrent_benchmark()</td><td class="desc"><code>ThreadPoolExecutor(max_workers=n_requests)</code> fires all 8 requests as close to simultaneously as Python threading allows — this concurrency is what continuous batching (<code>--parallel N</code>) actually exploits server-side.</td></tr>
+      <tr><td class="node-id">COMPARE</td><td class="loc">run_demo.py</td><td class="desc">Compares aggregate <code>tokens_per_sec</code> between a <code>--parallel 1</code> run and a <code>--parallel 4</code> run — SAME model, SAME hardware, ONLY the server's batching configuration differs.</td></tr>
+      <tr><td class="node-id">NOISY</td><td class="loc">tests/test_inference_serving.py</td><td class="desc">A real finding from building this project's tests: running 3-4 separate server lifecycles back-to-back in one pytest session introduced measurement noise that made the comparison flaky — fixed by restructuring to exactly 2 sequential server lifecycles per test file.</td></tr>
+    </table>
+
+    <div class="section-head"><h2>Concrete example paths</h2></div>
+    <div class="scenario-card">
+      <h4>Clean single-configuration benchmark</h4>
+      <p>Server starts, becomes ready, all 8 requests complete, aggregate throughput is computed from real token counts returned by the server.</p>
+      <span class="path">STARTSERVER → WAITLOOP(ready) → BENCHMARK → POOL(8 concurrent) → AGGREGATE → RESULT</span>
+    </div>
+    <div class="scenario-card">
+      <h4>Serial vs. batched comparison (clean run)</h4>
+      <p>Two separate, isolated server lifecycles — parallel=1 measured first, then parallel=4 — consistently shows 2.09-2.27x higher throughput for batching.</p>
+      <span class="path">run_config(1) → RESULT(188 tok/s) ... run_config(4) → RESULT(393-443 tok/s) → COMPARE → BATCHWINS</span>
+    </div>
+    <div class="scenario-card">
+      <h4>The flaky-test bug: too many server restarts in one session</h4>
+      <p>An earlier test suite version started 3-4 servers across multiple test functions in one pytest run — the rapid start/stop cycling introduced contention that once made batched throughput LOSE to serial (169 vs 184 tok/s), pure noise.</p>
+      <span class="path">[BROKEN]: 4 server lifecycles in 1 session → contention → NOISY result — FIXED by exactly 2 lifecycles, matching the clean demo pattern</span>
+    </div>
+
+    <div class="footer-nav">
+      <a href="index.html">← back to all flowcharts</a>
+      <a href="https://github.com/abhi32dev/ai-infrastructure-platform-2/tree/main/17-inference-serving" target="_blank" rel="noopener">17-inference-serving source ↗</a>
+    </div>
+  </div>
+</body>
+</html>

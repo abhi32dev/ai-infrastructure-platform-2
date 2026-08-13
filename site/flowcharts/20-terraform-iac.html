@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flowchart — Terraform IaC</title>
+<link rel="stylesheet" href="../vendor/flowchart.css">
+</head>
+<body>
+  <div class="topbar">
+    <div class="topbar-inner">
+      <span class="mono" style="font-size:12.5px;color:var(--text-tertiary)">SVC-20 · TERRAFORM IAC</span>
+      <div class="topbar-links">
+        <a href="index.html">← all flowcharts</a>
+        <a href="../index.html">portfolio home</a>
+        <a href="https://github.com/abhi32dev/ai-infrastructure-platform-2/tree/main/20-terraform-iac" target="_blank" rel="noopener">view source ↗</a>
+      </div>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <section class="hero">
+      <div class="eyebrow">Logic flow · 20-terraform-iac/</div>
+      <h1>Dependency ordering, then real usability verification beyond `apply` succeeding</h1>
+      <p class="hero-sub">Terraform’s dependency graph decides creation order automatically from resource references — the diagram traces that, then follows the separate verification script that proves each resource is actually USABLE, not just created.</p>
+    </section>
+
+    <div class="section-head"><h2>Legend</h2></div>
+    <div class="legend">
+      <div class="legend-item"><span class="legend-swatch start"></span> Entry point / start</div>
+      <div class="legend-item"><span class="legend-swatch process"></span> Function call (does work)</div>
+      <div class="legend-item"><span class="legend-swatch decision"></span> Real conditional in the code</div>
+      <div class="legend-item"><span class="legend-swatch terminal"></span> Output / end state</div>
+    </div>
+
+    <div class="section-head"><h2>Full logic flow</h2></div>
+    <div class="diagram-card">
+      <img class="diagram-svg" src="svg/20-terraform-iac.svg" alt="Flowchart: Terraform IaC logic flow" loading="lazy">
+    </div>
+
+    <div class="section-head"><h2>Node-by-node reference</h2></div>
+    <table class="ref-table">
+      <tr><th>Node</th><th>Location</th><th>What it does</th></tr>
+      <tr><td class="node-id">DEPCHECK</td><td class="loc">main.tf (implicit)</td><td class="desc"><code>aws_sqs_queue.ingestion</code>'s <code>redrive_policy</code> references <code>aws_sqs_queue.ingestion_dlq.arn</code> — Terraform detects this reference automatically and orders creation accordingly, no explicit <code>depends_on</code> needed.</td></tr>
+      <tr><td class="node-id">GETARN</td><td class="loc">Terraform's apply engine</td><td class="desc">Between creating the DLQ and the main queue, Terraform reads back the DLQ's REAL ARN from LocalStack's API response — the main queue's redrive policy references the actual provisioned resource, not a guessed value.</td></tr>
+      <tr><td class="node-id">VERIFYSCRIPT</td><td class="loc">verify_resources.py:run_all_verifications()</td><td class="desc">Reads resource identifiers from <code>terraform output -json</code> — never hardcoded — so a naming-convention change in <code>main.tf</code> would surface as a clear failure here, not a silent mismatch.</td></tr>
+      <tr><td class="node-id">ALLPASS</td><td class="loc">verify_resources.py</td><td class="desc">Each of the 3 resources gets a REAL write-then-read round trip (put_object/get_object, put_item/get_item, send_message/receive_message) — proving actual usability, since <code>terraform apply</code> succeeding only proves the CREATE api call worked.</td></tr>
+    </table>
+
+    <div class="section-head"><h2>Concrete example paths</h2></div>
+    <div class="scenario-card">
+      <h4>A clean apply, dependency-ordered</h4>
+      <p>The DLQ is created first (nothing depends on IT), its ARN is read back, then the main queue is created referencing that real ARN in its redrive policy.</p>
+      <span class="path">DEPCHECK(Yes) → ORDERED → CREATEDLQ → GETARN → CREATEMAIN → ALLDONE(5 resources)</span>
+    </div>
+    <div class="scenario-card">
+      <h4>Independent resources created in parallel</h4>
+      <p>The S3 bucket and DynamoDB table have no dependency on each other or the queues — Terraform creates them concurrently, observed finishing within the same few seconds.</p>
+      <span class="path">BUILDGRAPH → INDEPENDENT(bucket, table) → PARALLELCREATE</span>
+    </div>
+    <div class="scenario-card">
+      <h4>Proving usability, not just existence</h4>
+      <p>All 3 resource types pass a real write-then-read check through boto3 — the actual proof this infrastructure works, beyond a green terraform apply.</p>
+      <span class="path">ALLDONE → VERIFYSCRIPT → S3TEST(ok) + DDBTEST(ok) + SQSTEST(ok) → ALLPASS(Yes) → VERIFIED</span>
+    </div>
+
+    <div class="footer-nav">
+      <a href="index.html">← back to all flowcharts</a>
+      <a href="https://github.com/abhi32dev/ai-infrastructure-platform-2/tree/main/20-terraform-iac" target="_blank" rel="noopener">20-terraform-iac source ↗</a>
+    </div>
+  </div>
+</body>
+</html>

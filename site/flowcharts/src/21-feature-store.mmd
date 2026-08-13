@@ -1,0 +1,33 @@
+flowchart TD
+    START(["store.get_historical_features(<br/>entity_df, features).to_df()"]) --> ENTITYROW{"for each row in entity_df:<br/>(user_id, event_timestamp)"}
+
+    ENTITYROW --> FINDSNAPSHOTS["Feast looks up ALL recorded<br/>feature snapshots for this<br/>user_id in user_features.parquet"]
+
+    FINDSNAPSHOTS --> TIMECHECK{"for each snapshot,<br/>snapshot.event_timestamp<br/>&lt;= query.event_timestamp?<br/>(point-in-time join condition)"}
+
+    TIMECHECK -->|"Multiple snapshots qualify<br/>(all at or before query time)"| PICKLATEST["pick the snapshot with the<br/>LATEST event_timestamp among<br/>those that still qualify<br/>— NOT the latest snapshot overall"]
+    TIMECHECK -->|"Exactly one qualifies"| USEONLYONE["use that single snapshot"]
+    TIMECHECK -->|"ZERO snapshots qualify<br/>(query timestamp is BEFORE<br/>this user's earliest snapshot)<br/>— real finding, tested directly"| DROPROW["Feast's local file store<br/>DROPS this row entirely from<br/>the result — NOT a null-filled row<br/>(verified: len(result)==0 case)"]
+
+    PICKLATEST --> RETURNVALS["that snapshot's feature<br/>values become the result row"]
+    USEONLYONE --> RETURNVALS
+    RETURNVALS --> ENTITYROW
+    DROPROW --> ENTITYROW
+
+    ENTITYROW -->|"all entity_df rows processed"| HISTRESULT(["historical DataFrame —<br/>may have FEWER rows than<br/>entity_df if any rows<br/>were dropped"])
+
+    HISTRESULT -.->|"contrast: online path"| ONLINESTART
+    ONLINESTART["store.get_online_features(<br/>features, entity_rows).to_dict()"] --> ONLINELOOKUP["reads from the SQLite<br/>online store — populated by<br/>'feast materialize' beforehand"]
+    ONLINELOOKUP --> LATESTONLY["ALWAYS returns the single<br/>most-recently-materialized<br/>value per entity — no<br/>timestamp parameter at all"]
+    LATESTONLY --> ONLINERESULT(["online result: user 1 →<br/>avg_rating_given=4.2<br/>(the LATEST snapshot,<br/>unconditionally)"])
+
+    HISTRESULT -.->|"SAME user 1, queried<br/>at a PAST timestamp"| CONTRAST(["historical result: user 1 →<br/>avg_rating_given=3.0 or 3.5<br/>depending on query time<br/>— PROVABLY different from<br/>the online 4.2"])
+
+    classDef startNode fill:#D9F0E5,stroke:#1F8F63,stroke-width:2px
+    classDef decisionNode fill:#FBF3E6,stroke:#B5701F,stroke-width:2px
+    classDef endNode fill:#E8EBEE,stroke:#8993A0,stroke-width:2px
+    classDef warnNode fill:#F7DEDA,stroke:#C23B2E,stroke-width:2px
+    class START,ONLINESTART startNode
+    class ENTITYROW,TIMECHECK decisionNode
+    class HISTRESULT,ONLINERESULT endNode
+    class DROPROW warnNode

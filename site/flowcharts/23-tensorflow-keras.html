@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flowchart — TensorFlow / Keras</title>
+<link rel="stylesheet" href="../vendor/flowchart.css">
+</head>
+<body>
+  <div class="topbar">
+    <div class="topbar-inner">
+      <span class="mono" style="font-size:12.5px;color:var(--text-tertiary)">SVC-23 · TENSORFLOW / KERAS</span>
+      <div class="topbar-links">
+        <a href="index.html">← all flowcharts</a>
+        <a href="../index.html">portfolio home</a>
+        <a href="https://github.com/abhi32dev/ai-infrastructure-platform-2/tree/main/23-tensorflow-keras" target="_blank" rel="noopener">view source ↗</a>
+      </div>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <section class="hero">
+      <div class="eyebrow">Logic flow · 23-tensorflow-keras/</div>
+      <h1>Two real Keras API bugs, then a training loop and an export-correctness proof</h1>
+      <p class="hero-sub">This diagram opens with the exact sequence of wrong guesses that led to the right fix for a genuine Keras API-compatibility break, then follows the callback-driven training loop and the TFLite export verification.</p>
+    </section>
+
+    <div class="section-head"><h2>Legend</h2></div>
+    <div class="legend">
+      <div class="legend-item"><span class="legend-swatch start"></span> Entry point / start</div>
+      <div class="legend-item"><span class="legend-swatch process"></span> Function call (does work)</div>
+      <div class="legend-item"><span class="legend-swatch decision"></span> Real conditional in the code</div>
+      <div class="legend-item"><span class="legend-swatch terminal"></span> Output / end state</div>
+    </div>
+
+    <div class="section-head"><h2>Full logic flow</h2></div>
+    <div class="diagram-card">
+      <img class="diagram-svg" src="svg/23-tensorflow-keras.svg" alt="Flowchart: TensorFlow / Keras logic flow" loading="lazy">
+    </div>
+
+    <div class="section-head"><h2>Node-by-node reference</h2></div>
+    <table class="ref-table">
+      <tr><th>Node</th><th>Location</th><th>What it does</th></tr>
+      <tr><td class="node-id">APIATTEMPT</td><td class="loc">train.py:load_data()</td><td class="desc">Two wrong API guesses, both with misleading error messages: <code>path=&lt;full path&gt;</code> raised a ValueError suggesting <code>cache_dir</code>; <code>cache_dir=...</code> then raised TypeError since that kwarg doesn't exist either. The actual fix came from <code>inspect.signature(mnist.load_data)</code> revealing the real, undocumented signature.</td></tr>
+      <tr><td class="node-id">IMPROVED</td><td class="loc">train.py:train() (Keras callbacks)</td><td class="desc"><code>EarlyStopping(patience=2, restore_best_weights=True)</code> and <code>ModelCheckpoint(save_best_only=True)</code> run automatically after every epoch — Keras' idiomatic callback system, distinct from PyTorch's manual training loop in other projects.</td></tr>
+      <tr><td class="node-id">AGREECHECK</td><td class="loc">export_tflite.py:compare_keras_vs_tflite()</td><td class="desc">For 20 real held-out samples, runs inference through BOTH the original Keras model AND the exported TFLite interpreter, comparing predicted classes directly — proving the export preserved model behavior, not just that the conversion didn't error.</td></tr>
+    </table>
+
+    <div class="section-head"><h2>Concrete example paths</h2></div>
+    <div class="scenario-card">
+      <h4>Diagnosing a real Keras API break</h4>
+      <p>Two increasingly specific wrong guesses, each with an error message that pointed toward (but didn't quite match) the actual fix — resolved by inspecting the real function signature directly rather than trusting the error text.</p>
+      <span class="path">APIATTEMPT(path=full_path) → ATTEMPT1FAIL → APIATTEMPT(cache_dir=...) → ATTEMPT2FAIL → APIATTEMPT(inspect.signature) → WORKS</span>
+    </div>
+    <div class="scenario-card">
+      <h4>Training with early stopping</h4>
+      <p>If validation accuracy stops improving for 2 consecutive epochs, training halts early and the BEST weights (not the last epoch's) are restored automatically.</p>
+      <span class="path">EPOCHLOOP → VALCHECK(no improvement) → IMPROVED(No)×2 → STOPEARLY(restore best) → TRAINDONE</span>
+    </div>
+    <div class="scenario-card">
+      <h4>Proving the TFLite export didn't change behavior</h4>
+      <p>All 20 held-out samples produce identical predictions from the original Keras model and the exported TFLite model — real, measured evidence the 67.9%-smaller export still behaves the same.</p>
+      <span class="path">COMPARELOOP×20 → KERASPRED vs TFLITEPRED → AGREECHECK(match, all 20) → FINALRESULT(100% agreement)</span>
+    </div>
+
+    <div class="footer-nav">
+      <a href="index.html">← back to all flowcharts</a>
+      <a href="https://github.com/abhi32dev/ai-infrastructure-platform-2/tree/main/23-tensorflow-keras" target="_blank" rel="noopener">23-tensorflow-keras source ↗</a>
+    </div>
+  </div>
+</body>
+</html>

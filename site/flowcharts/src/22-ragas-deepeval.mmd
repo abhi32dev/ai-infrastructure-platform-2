@@ -1,0 +1,33 @@
+flowchart TD
+    START(["compare.py : run both frameworks<br/>against the SAME RAG pipeline<br/>and question set"]) --> RAGASPATH["ragas_eval.py : run_ragas_evaluation()"]
+    START --> DEEPEVALPATH["deepeval_eval.py : run_deepeval_evaluation()"]
+
+    RAGASPATH --> RAGASJUDGE["LangchainLLMWrapper(<br/>ChatOllama(llama3.2:1b))<br/>wraps the local model as ragas's judge"]
+    RAGASJUDGE --> RAGASEVAL["ragas.evaluate(dataset, metrics=[<br/>faithfulness, answer_relevancy,<br/>context_precision, context_recall],<br/>run_config=RunConfig(max_workers=2))"]
+
+    RAGASEVAL --> CONCURRENCY{"internal: how many<br/>judge sub-calls run<br/>concurrently?"}
+    CONCURRENCY -->|"default (unset) —<br/>REAL BUG: too high<br/>for a local CPU judge"| TIMEOUTS["6 of 16 jobs TimeoutError<br/>context_precision → NaN<br/>for every question"]
+    CONCURRENCY -->|"max_workers=2 (the fix)"| SUCCEEDS["most jobs complete<br/>context_precision recovers<br/>to 1.0 for 3/4 questions"]
+
+    TIMEOUTS --> RAGASRESULT
+    SUCCEEDS --> RAGASRESULT(["Ragas result: per-metric<br/>scores, NaN where a judge<br/>sub-call failed — FAILS SILENT"])
+
+    DEEPEVALPATH --> DEJUDGE["OllamaDeepEvalModel(model_name)<br/>custom DeepEvalBaseLLM subclass<br/>wrapping ChatOllama"]
+    DEJUDGE --> DEMETRIC["FaithfulnessMetric(model=judge).measure(<br/>test_case)<br/>— internally asks the judge model<br/>to output STRICT JSON verdicts"]
+
+    DEMETRIC --> JSONPARSE{"trimAndLoadJson(<br/>judge's raw output)<br/>succeeds?"}
+    JSONPARSE -->|"No (llama3.2:1b<br/>on some inputs)"| RAISEVALUEERR["raise ValueError(<br/>'Evaluation LLM outputted<br/>an invalid JSON...<br/>use a better evaluation model')<br/>— FAILS LOUD, stops immediately"]
+    JSONPARSE -->|"Yes (llama3.2:1b on<br/>simpler inputs, OR<br/>qwen2.5:1.5b consistently)"| DERESULT(["DeepEval result: valid<br/>0-1 score, metric.score set"])
+
+    RAISEVALUEERR --> INTERMITTENT(["real finding: this is<br/>INTERMITTENT, not deterministic —<br/>same code, same model, different<br/>inputs → sometimes raises,<br/>sometimes succeeds"])
+
+    RAGASRESULT -.->|"same underlying cause:<br/>small local judge model<br/>struggles with structured output<br/>under load/complexity"| DERESULT
+
+    classDef startNode fill:#D9F0E5,stroke:#1F8F63,stroke-width:2px
+    classDef decisionNode fill:#FBF3E6,stroke:#B5701F,stroke-width:2px
+    classDef endNode fill:#E8EBEE,stroke:#8993A0,stroke-width:2px
+    classDef warnNode fill:#F7DEDA,stroke:#C23B2E,stroke-width:2px
+    class START startNode
+    class CONCURRENCY,JSONPARSE decisionNode
+    class DERESULT,SUCCEEDS endNode
+    class RAISEVALUEERR,TIMEOUTS warnNode

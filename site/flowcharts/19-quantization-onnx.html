@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flowchart — Quantization & ONNX Export</title>
+<link rel="stylesheet" href="../vendor/flowchart.css">
+</head>
+<body>
+  <div class="topbar">
+    <div class="topbar-inner">
+      <span class="mono" style="font-size:12.5px;color:var(--text-tertiary)">SVC-19 · QUANTIZATION & ONNX EXPORT</span>
+      <div class="topbar-links">
+        <a href="index.html">← all flowcharts</a>
+        <a href="../index.html">portfolio home</a>
+        <a href="https://github.com/abhi32dev/ai-infrastructure-platform-2/tree/main/19-quantization-onnx" target="_blank" rel="noopener">view source ↗</a>
+      </div>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <section class="hero">
+      <div class="eyebrow">Logic flow · 19-quantization-onnx/</div>
+      <h1>A real exporter bug, then a genuinely counter-intuitive measured result</h1>
+      <p class="hero-sub">This diagram is built around two surprises: an ONNX export bug that had to be diagnosed and fixed, and a final measurement that contradicts the intuitive assumption that quantization always makes things faster.</p>
+    </section>
+
+    <div class="section-head"><h2>Legend</h2></div>
+    <div class="legend">
+      <div class="legend-item"><span class="legend-swatch start"></span> Entry point / start</div>
+      <div class="legend-item"><span class="legend-swatch process"></span> Function call (does work)</div>
+      <div class="legend-item"><span class="legend-swatch decision"></span> Real conditional in the code</div>
+      <div class="legend-item"><span class="legend-swatch terminal"></span> Output / end state</div>
+    </div>
+
+    <div class="section-head"><h2>Full logic flow</h2></div>
+    <div class="diagram-card">
+      <img class="diagram-svg" src="svg/19-quantization-onnx.svg" alt="Flowchart: Quantization & ONNX Export logic flow" loading="lazy">
+    </div>
+
+    <div class="section-head"><h2>Node-by-node reference</h2></div>
+    <table class="ref-table">
+      <tr><th>Node</th><th>Location</th><th>What it does</th></tr>
+      <tr><td class="node-id">EXPORTMODE</td><td class="loc">train_and_export.py:export_to_onnx()</td><td class="desc">The newer “dynamo” ONNX exporter (PyTorch's new default) produced a graph that broke <code>onnxruntime.quantize_dynamic</code> with a shape-inference error. The fix: explicitly pass <code>dynamo=False</code> to use the older, more conventional TorchScript-based exporter.</td></tr>
+      <tr><td class="node-id">QUANTIZE</td><td class="loc">train_and_export.py:run_full_pipeline()</td><td class="desc"><code>quantize_dynamic(..., weight_type=QUInt8)</code> — dynamic (weights-only) quantization, the simplest ONNX Runtime mode, deliberately chosen over static quantization to avoid needing calibration data.</td></tr>
+      <tr><td class="node-id">LATCHECK</td><td class="loc">train_and_export.py:evaluate_onnx()</td><td class="desc">The measurement that produced the real finding: INT8 latency was measured, not assumed — and it came out 3-4x SLOWER than fp32, reproduced across two additional clean runs to rule out a one-off fluke.</td></tr>
+    </table>
+
+    <div class="section-head"><h2>Concrete example paths</h2></div>
+    <div class="scenario-card">
+      <h4>The exporter bug, found and fixed</h4>
+      <p>The default dynamo-based exporter's output graph couldn't be quantized — root-caused to the exporter choice, not the quantization tool, and fixed with one explicit flag.</p>
+      <span class="path">EXPORTMODE(dynamo=True) → DYNAMOFAIL(shape-inference error) → SWITCHFIX(dynamo=False) → LEGACYOK → QUANTIZE(succeeds)</span>
+    </div>
+    <div class="scenario-card">
+      <h4>Size and accuracy both improve, as expected</h4>
+      <p>72.3% smaller file, accuracy actually held (+0.003, within noise for a 2-epoch run) — the comfortable, expected part of the result.</p>
+      <span class="path">COMPARERESULTS → SIZECHECK(-72.3%) → ACCCHECK(+0.003, no regression)</span>
+    </div>
+    <div class="scenario-card">
+      <h4>Latency gets WORSE, not better — the actual finding</h4>
+      <p>Measured three separate times: INT8 consistently 3-4x slower than fp32 on this CPU, because dynamic quantization's runtime dequantization overhead exceeds the compute savings for a model this small.</p>
+      <span class="path">LATCHECK(int8 &lt; fp32? expected Yes) → ACTUALSLOW(measured No — INT8 slower) → reported honestly, not hidden</span>
+    </div>
+
+    <div class="footer-nav">
+      <a href="index.html">← back to all flowcharts</a>
+      <a href="https://github.com/abhi32dev/ai-infrastructure-platform-2/tree/main/19-quantization-onnx" target="_blank" rel="noopener">19-quantization-onnx source ↗</a>
+    </div>
+  </div>
+</body>
+</html>

@@ -1,0 +1,28 @@
+flowchart TD
+    START(["regression_gate.py : main()<br/>python regression_gate.py [--update-baseline]"]) --> RUNEVAL["eval_harness.py : evaluate_and_log(CURRENT_PROMPT_VERSION)<br/>runs judge against all 6 scenarios,<br/>logs params+metrics to MLflow (sqlite)"]
+
+    RUNEVAL --> ISUPDATE{"'--update-baseline'<br/>in sys.argv?"}
+    ISUPDATE -->|"Yes"| WRITEBASE["write_baseline(summary)<br/>overwrites baseline_metrics.json<br/>with THIS run's agreement_rate"]
+    WRITEBASE --> EXIT0A(["return 0<br/>(baseline updated, always passes)"])
+
+    ISUPDATE -->|"No (default CI path)"| LOADBASE["load_baseline()<br/>read baseline_metrics.json"]
+    LOADBASE --> BASEEXISTS{"baseline file<br/>exists?"}
+    BASEEXISTS -->|"No"| FIRSTRUN["treat this run as the<br/>first baseline, write it"]
+    FIRSTRUN --> EXIT0B(["return 0"])
+
+    BASEEXISTS -->|"Yes"| COMPUTE["threshold = baseline.agreement_rate<br/>- REGRESSION_TOLERANCE (0.0)"]
+    COMPUTE --> REGCHECK{"summary.agreement_rate<br/>&lt; threshold?"}
+    REGCHECK -->|"Yes → regression detected"| PRINTFAIL["print 'REGRESSION DETECTED:<br/>blocking merge'"]
+    PRINTFAIL --> EXIT1(["return 1<br/>→ CI job fails,<br/>branch-protection blocks merge"])
+
+    REGCHECK -->|"No → equal or better"| PRINTOK["print 'No regression.<br/>Gate passes.'"]
+    PRINTOK --> EXIT0C(["return 0<br/>→ CI job succeeds"])
+
+    classDef startNode fill:#D9F0E5,stroke:#1F8F63,stroke-width:2px
+    classDef decisionNode fill:#FBF3E6,stroke:#B5701F,stroke-width:2px
+    classDef endNode fill:#E8EBEE,stroke:#8993A0,stroke-width:2px
+    classDef warnNode fill:#F7DEDA,stroke:#C23B2E,stroke-width:2px
+    class START startNode
+    class ISUPDATE,BASEEXISTS,REGCHECK decisionNode
+    class EXIT0A,EXIT0B,EXIT0C endNode
+    class EXIT1 warnNode

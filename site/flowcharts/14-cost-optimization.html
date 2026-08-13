@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flowchart — Semantic Cache & Cost Dashboard</title>
+<link rel="stylesheet" href="../vendor/flowchart.css">
+</head>
+<body>
+  <div class="topbar">
+    <div class="topbar-inner">
+      <span class="mono" style="font-size:12.5px;color:var(--text-tertiary)">SVC-14 · SEMANTIC CACHE & COST DASHBOARD</span>
+      <div class="topbar-links">
+        <a href="index.html">← all flowcharts</a>
+        <a href="../index.html">portfolio home</a>
+        <a href="https://github.com/abhi32dev/ai-infrastructure-platform-2/tree/main/14-cost-optimization" target="_blank" rel="noopener">view source ↗</a>
+      </div>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <section class="hero">
+      <div class="eyebrow">Logic flow · 14-cost-optimization/</div>
+      <h1>How a query becomes a cache hit — or doesn't</h1>
+      <p class="hero-sub">Every query is embedded and compared against every previously-cached entry before the LLM is ever considered. The diagram traces the similarity scan, the calibrated threshold decision, and what gets logged either way.</p>
+    </section>
+
+    <div class="section-head"><h2>Legend</h2></div>
+    <div class="legend">
+      <div class="legend-item"><span class="legend-swatch start"></span> Entry point / start</div>
+      <div class="legend-item"><span class="legend-swatch process"></span> Function call (does work)</div>
+      <div class="legend-item"><span class="legend-swatch decision"></span> Real conditional in the code</div>
+      <div class="legend-item"><span class="legend-swatch terminal"></span> Output / end state</div>
+    </div>
+
+    <div class="section-head"><h2>Full logic flow</h2></div>
+    <div class="diagram-card">
+      <img class="diagram-svg" src="svg/14-cost-optimization.svg" alt="Flowchart: Semantic Cache & Cost Dashboard logic flow" loading="lazy">
+    </div>
+
+    <div class="section-head"><h2>Node-by-node reference</h2></div>
+    <table class="ref-table">
+      <tr><th>Node</th><th>Location</th><th>What it does</th></tr>
+      <tr><td class="node-id">EMPTYCACHE</td><td class="loc">semantic_cache.py:SemanticCache.lookup()</td><td class="desc">The very first query of a session always misses — there's nothing yet to compare against, so the scan is skipped entirely and the function returns <code>None</code> immediately.</td></tr>
+      <tr><td class="node-id">SCANLOOP / COSINE</td><td class="loc">semantic_cache.py:SemanticCache.lookup()</td><td class="desc">A linear scan over every cached entry, computing cosine similarity against each one, tracking the single best match — appropriate at this project's demo scale (tens of entries), not what a production-scale cache would use.</td></tr>
+      <tr><td class="node-id">THRESHCHECK</td><td class="loc">semantic_cache.py:SemanticCache.lookup()</td><td class="desc"><code>threshold=0.75</code> — NOT a guessed number. The original guess of 0.92 was tested directly and produced zero cache hits; 0.75 was calibrated from measuring real cosine similarities between actual paraphrase pairs.</td></tr>
+      <tr><td class="node-id">STORECACHE</td><td class="loc">cached_pipeline.py:CachedPipeline.query()</td><td class="desc">Runs on every cache MISS — the fresh response gets embedded and appended to <code>_entries</code>, making it available for future lookups. This is also what makes cache size grow unboundedly across a long session (a documented known limitation).</td></tr>
+    </table>
+
+    <div class="section-head"><h2>Concrete example paths</h2></div>
+    <div class="scenario-card">
+      <h4>First query of a session</h4>
+      <p>No prior entries exist, so the lookup short-circuits to a miss without even computing an embedding for comparison.</p>
+      <span class="path">LOOKUP → EMPTYCACHE(Yes) → RETURNNONE1 → MISSFLOW → CALLLLM → STORECACHE</span>
+    </div>
+    <div class="scenario-card">
+      <h4>A close paraphrase of a cached question</h4>
+      <p>"When an instance fails its health check, what happens automatically?" scores 0.790 similarity against the cached "What happens when an EC2 receiver fails health checks?" — above the 0.75 threshold, so it hits.</p>
+      <span class="path">LOOKUP → SCANLOOP → COSINE(0.790) → THRESHCHECK(&gt;=0.75 → Yes) → HITPATH → LOGHIT(actual_cost=0.0)</span>
+    </div>
+    <div class="scenario-card">
+      <h4>A looser paraphrase that correctly misses</h4>
+      <p>A more loosely related question scores 0.567 — below threshold, correctly treated as a genuinely different query rather than risking a wrong cached answer.</p>
+      <span class="path">LOOKUP → SCANLOOP → COSINE(0.567) → THRESHCHECK(No) → RETURNNONE2 → MISSFLOW → CALLLLM</span>
+    </div>
+
+    <div class="footer-nav">
+      <a href="index.html">← back to all flowcharts</a>
+      <a href="https://github.com/abhi32dev/ai-infrastructure-platform-2/tree/main/14-cost-optimization" target="_blank" rel="noopener">14-cost-optimization source ↗</a>
+    </div>
+  </div>
+</body>
+</html>

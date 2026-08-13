@@ -1,0 +1,33 @@
+flowchart TD
+    START(["CachedPipeline.query(text)"]) --> LOOKUP["semantic_cache.py :<br/>cache.lookup(text)"]
+
+    LOOKUP --> EMPTYCACHE{"self._entries<br/>is empty?"}
+    EMPTYCACHE -->|"Yes"| RETURNNONE1(["return None immediately"])
+    EMPTYCACHE -->|"No"| EMBEDQ["query_emb = _embedder.embed_query(text)<br/>(nomic-embed-text)"]
+
+    EMBEDQ --> SCANLOOP{"for entry in<br/>self._entries"}
+    SCANLOOP --> COSINE["score = cosine_similarity(<br/>query_emb, entry.embedding)"]
+    COSINE --> TRACKBEST["if score &gt; best_score:<br/>best_entry, best_score = entry, score"]
+    TRACKBEST --> SCANLOOP
+    SCANLOOP -->|"all entries scanned"| THRESHCHECK{"best_score &gt;=<br/>threshold (0.75)?<br/>— calibrated from<br/>MEASURED data, not guessed"}
+
+    THRESHCHECK -->|"Yes → cache HIT"| HITPATH["return {...best_entry, similarity: best_score}"]
+    THRESHCHECK -->|"No → cache MISS"| RETURNNONE2(["return None"])
+
+    HITPATH --> LOGHIT["cost_ledger.py : log_request(<br/>cache_hit=True,<br/>tokens=input+cached_response tokens,<br/>actual_cost=0.0,<br/>would_be_cost=estimate_cost(tokens))<br/>— LLM is NEVER called"]
+    LOGHIT --> RETURNCACHED(["return cached response,<br/>marked cache_hit=True"])
+
+    RETURNNONE1 --> MISSFLOW
+    RETURNNONE2 --> MISSFLOW
+    MISSFLOW["cache miss → real LLM call"] --> CALLLLM["self.llm.invoke(text)<br/>real ChatOllama call"]
+    CALLLLM --> COMPUTECOST["total_tokens = input + response tokens<br/>cost = estimate_cost(total_tokens)"]
+    COMPUTECOST --> STORECACHE["cache.store(text, response)<br/>embeds text AGAIN, appends to _entries<br/>— now available for FUTURE lookups"]
+    STORECACHE --> LOGMISS["log_request(cache_hit=False,<br/>actual_cost=cost, would_be_cost=cost<br/>— same number both ways on a miss)"]
+    LOGMISS --> RETURNFRESH(["return fresh response,<br/>marked cache_hit=False"])
+
+    classDef startNode fill:#D9F0E5,stroke:#1F8F63,stroke-width:2px
+    classDef decisionNode fill:#FBF3E6,stroke:#B5701F,stroke-width:2px
+    classDef endNode fill:#E8EBEE,stroke:#8993A0,stroke-width:2px
+    class START startNode
+    class EMPTYCACHE,SCANLOOP,THRESHCHECK decisionNode
+    class RETURNCACHED,RETURNFRESH endNode

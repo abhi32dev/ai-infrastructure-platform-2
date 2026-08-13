@@ -1,0 +1,38 @@
+flowchart TD
+    START(["top-level caller:<br/>ClientSession.call_tool(<br/>'diagnose_and_remediate_fleet',<br/>{instance_id})"]) --> COORDSERVER["coordinator_server.py :<br/>diagnose_and_remediate_fleet(instance_id)<br/>(the ONLY tool this server exposes)"]
+
+    COORDSERVER --> OPENSESSION["opens ONE persistent stdio_client<br/>session to specialist_server.py<br/>(kept alive for the whole call)"]
+
+    OPENSESSION --> HEALTHCALL["session.call_tool('get_instance_health',<br/>{instance_id})"]
+    HEALTHCALL --> SPECIALIST1["specialist_server.py :<br/>get_instance_health(instance_id)<br/>looks up _INSTANCES dict"]
+    SPECIALIST1 --> KNOWNCHECK{"instance_id in<br/>_INSTANCES?"}
+    KNOWNCHECK -->|"No"| UNKNOWN(["return 'unknown instance: ...'"])
+    KNOWNCHECK -->|"Yes"| STATUSSTR["return f'{id}: status={status} az={az}'"]
+
+    STATUSSTR --> HEALTHYCHECK{"coordinator checks:<br/>'unhealthy' in<br/>health response string?"}
+    HEALTHYCHECK -->|"No → already healthy"| SKIP["log 'already healthy,<br/>no remediation needed'<br/>— restart/search NEVER called"]
+    SKIP --> RETURNLOG1(["return joined log lines"])
+
+    HEALTHYCHECK -->|"Yes"| RESTARTCALL["session.call_tool('restart_instance',<br/>{instance_id})<br/>— SAME session, so specialist's<br/>in-memory state persists"]
+    RESTARTCALL --> SPECIALIST2["specialist_server.py :<br/>restart_instance(instance_id)"]
+    SPECIALIST2 --> RESTARTKNOWN{"instance_id in<br/>_INSTANCES?"}
+    RESTARTKNOWN -->|"No"| RESTARTFAIL(["'cannot restart<br/>unknown instance'"])
+    RESTARTKNOWN -->|"Yes"| MUTATE["_INSTANCES[id]['status'] = 'healthy'<br/>(mutates the SAME dict the<br/>next health check will read)"]
+
+    MUTATE --> SEARCHCALL["session.call_tool('search_incident_log',<br/>{keyword: 'health check'})"]
+    SEARCHCALL --> SPECIALIST3["specialist_server.py :<br/>search_incident_log(keyword)"]
+    SPECIALIST3 --> MATCHCHECK{"any _INCIDENT_LOG entry<br/>contains keyword?"}
+    MATCHCHECK -->|"No"| NOMATCH(["'no incidents found<br/>matching ...'"])
+    MATCHCHECK -->|"Yes"| MATCHES["return joined matching summaries"]
+
+    MATCHES --> RECHECKCALL["session.call_tool('get_instance_health',<br/>{instance_id}) — SAME session again"]
+    NOMATCH --> RECHECKCALL
+    RECHECKCALL --> SPECIALIST4["get_instance_health(instance_id)<br/>reads the MUTATED status → 'healthy'"]
+    SPECIALIST4 --> RETURNLOG2(["return joined log lines,<br/>ending 'status=healthy'"])
+
+    classDef startNode fill:#D9F0E5,stroke:#1F8F63,stroke-width:2px
+    classDef decisionNode fill:#FBF3E6,stroke:#B5701F,stroke-width:2px
+    classDef endNode fill:#E8EBEE,stroke:#8993A0,stroke-width:2px
+    class START startNode
+    class KNOWNCHECK,HEALTHYCHECK,RESTARTKNOWN,MATCHCHECK decisionNode
+    class RETURNLOG1,RETURNLOG2 endNode

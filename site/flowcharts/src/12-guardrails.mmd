@@ -1,0 +1,34 @@
+flowchart TD
+    START(["run_guarded_query(user_id, prompt)"]) --> RATELIMIT["rate_limiter.py :<br/>_limiter.allow(user_id)<br/>token-bucket check"]
+
+    RATELIMIT --> RLCHECK{"tokens available<br/>&gt;= cost (1.0)?"}
+    RLCHECK -->|"No"| BLOCKED1(["outcome='BLOCKED'<br/>reason='rate_limit_exceeded'<br/>— LLM never called"])
+    RLCHECK -->|"Yes"| CONSUME["tokens -= cost<br/>bucket refills over time<br/>via refill_per_second"]
+
+    CONSUME --> INJECTCHECK["prompt_injection_detector.py :<br/>detect_prompt_injection(prompt)<br/>tests 8 regex patterns (re.I)"]
+    INJECTCHECK --> INJRESULT{"any pattern<br/>matched?"}
+    INJRESULT -->|"Yes"| BLOCKED2(["outcome='BLOCKED'<br/>reason='prompt_injection_detected'<br/>matched_patterns=[...]<br/>— LLM never called"])
+
+    INJRESULT -->|"No"| REDACT["pii_detector.py :<br/>redact_pii(prompt)<br/>tests 4 regex patterns:<br/>email, ssn, phone, credit_card"]
+    REDACT --> FOUNDPII{"any PII pattern<br/>matched?"}
+    FOUNDPII -->|"Yes"| REPLACED["each match replaced with<br/>[REDACTED_&lt;TYPE&gt;]<br/>in the prompt sent to the model"]
+    FOUNDPII -->|"No"| UNCHANGED["prompt sent as-is"]
+
+    REPLACED --> LLMCALL["ChatOllama(llama3.2:1b).invoke(<br/>redacted_prompt)"]
+    UNCHANGED --> LLMCALL
+
+    LLMCALL --> OUTCHECK["output_guardrails.py :<br/>check_output(response_text,<br/>input_pii_findings)"]
+    OUTCHECK --> SCANOUT["detect_pii(response_text)<br/>— scans the MODEL'S OUTPUT too"]
+    SCANOUT --> LEAKCHECK{"any category found in<br/>output_pii ALSO in<br/>redacted_input_findings?<br/>(only categories that were<br/>ACTUALLY redacted count)"}
+
+    LEAKCHECK -->|"Yes → leak detected"| FLAGGED["outcome='FLAGGED'<br/>response replaced with<br/>'[response withheld:<br/>output guardrail detected a leak]'"]
+    LEAKCHECK -->|"No"| ALLOWED["outcome='ALLOWED'<br/>real response returned"]
+
+    classDef startNode fill:#D9F0E5,stroke:#1F8F63,stroke-width:2px
+    classDef decisionNode fill:#FBF3E6,stroke:#B5701F,stroke-width:2px
+    classDef endNode fill:#E8EBEE,stroke:#8993A0,stroke-width:2px
+    classDef warnNode fill:#F7DEDA,stroke:#C23B2E,stroke-width:2px
+    class START startNode
+    class RLCHECK,INJRESULT,FOUNDPII,LEAKCHECK decisionNode
+    class ALLOWED endNode
+    class BLOCKED1,BLOCKED2,FLAGGED warnNode

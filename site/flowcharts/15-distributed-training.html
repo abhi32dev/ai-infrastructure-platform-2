@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flowchart — Distributed Training (DDP)</title>
+<link rel="stylesheet" href="../vendor/flowchart.css">
+</head>
+<body>
+  <div class="topbar">
+    <div class="topbar-inner">
+      <span class="mono" style="font-size:12.5px;color:var(--text-tertiary)">SVC-15 · DISTRIBUTED TRAINING (DDP)</span>
+      <div class="topbar-links">
+        <a href="index.html">← all flowcharts</a>
+        <a href="../index.html">portfolio home</a>
+        <a href="https://github.com/abhi32dev/ai-infrastructure-platform-2/tree/main/15-distributed-training" target="_blank" rel="noopener">view source ↗</a>
+      </div>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <section class="hero">
+      <div class="eyebrow">Logic flow · 15-distributed-training/</div>
+      <h1>What happens inside each of the 4 ranks, and how they end up identical</h1>
+      <p class="hero-sub">Four real OS processes, each running the identical training loop on a different shard of data — the diagram follows one rank’s full lifecycle from process-group init through the gradient all-reduce that happens invisibly inside <code>.backward()</code>.</p>
+    </section>
+
+    <div class="section-head"><h2>Legend</h2></div>
+    <div class="legend">
+      <div class="legend-item"><span class="legend-swatch start"></span> Entry point / start</div>
+      <div class="legend-item"><span class="legend-swatch process"></span> Function call (does work)</div>
+      <div class="legend-item"><span class="legend-swatch decision"></span> Real conditional in the code</div>
+      <div class="legend-item"><span class="legend-swatch terminal"></span> Output / end state</div>
+    </div>
+
+    <div class="section-head"><h2>Full logic flow</h2></div>
+    <div class="diagram-card">
+      <img class="diagram-svg" src="svg/15-distributed-training.svg" alt="Flowchart: Distributed Training (DDP) logic flow" loading="lazy">
+    </div>
+
+    <div class="section-head"><h2>Node-by-node reference</h2></div>
+    <table class="ref-table">
+      <tr><th>Node</th><th>Location</th><th>What it does</th></tr>
+      <tr><td class="node-id">INITPG</td><td class="loc">train_ddp.py:setup()</td><td class="desc"><code>dist.init_process_group(backend='gloo', rank, world_size)</code> — this is a BARRIER: all 4 ranks must call it before any of them proceeds, forming the actual process group that later collective operations use.</td></tr>
+      <tr><td class="node-id">SHARD</td><td class="loc">train_ddp.py:run_worker()</td><td class="desc"><code>DistributedSampler</code> gives each rank a genuinely different 1/world_size slice of the dataset — verified directly: rank 0's shard is exactly 1000 of the 4000 total samples, not the full set.</td></tr>
+      <tr><td class="node-id">BACKWARD</td><td class="loc">train_ddp.py:run_worker()</td><td class="desc">The single most important line in the whole project: <code>loss.backward()</code> looks like an ordinary PyTorch call, but because the model is wrapped in <code>DistributedDataParallel</code>, this call transparently all-reduces gradients across all 4 ranks before returning.</td></tr>
+      <tr><td class="node-id">DISTCHECK</td><td class="loc">compare_weights.py:max_pairwise_l2()</td><td class="desc">After training, every rank's saved weights are flattened and compared pairwise. Measured: exactly 0.0 for the DDP run (bit-for-bit identical), versus 0.3655 for a no-sync control trained on the same shards without gradient sharing.</td></tr>
+    </table>
+
+    <div class="section-head"><h2>Concrete example paths</h2></div>
+    <div class="scenario-card">
+      <h4>Normal DDP training run</h4>
+      <p>All 4 ranks initialize together, train on their own shard, and their gradients get synchronized on every single backward() call — by the end, every rank has learned from ALL the data, not just its own shard.</p>
+      <span class="path">SPAWN → 4× [INITPG → SHARD → EPOCHLOOP → BACKWARD(all-reduce)] → SAVERANK → CLEANUP → COMPARE(0.0 apart)</span>
+    </div>
+    <div class="scenario-card">
+      <h4>The no-sync control (the negative case)</h4>
+      <p>The exact same sharded setup, but WITHOUT the DDP wrapper — each rank's gradients never leave its own process, so each one learns a DIFFERENT model from only its own 1/4 of the data.</p>
+      <span class="path">4× [SHARD → EPOCHLOOP → BACKWARD(no sync)] → SAVERANK → COMPARE(0.3655 apart)</span>
+    </div>
+
+    <div class="footer-nav">
+      <a href="index.html">← back to all flowcharts</a>
+      <a href="https://github.com/abhi32dev/ai-infrastructure-platform-2/tree/main/15-distributed-training" target="_blank" rel="noopener">15-distributed-training source ↗</a>
+    </div>
+  </div>
+</body>
+</html>

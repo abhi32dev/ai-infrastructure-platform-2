@@ -1,0 +1,42 @@
+flowchart TD
+    START(["run_traced_query(query)<br/>traced_pipeline.py"]) --> SPAN1["tracer.start_as_current_span('rag_query')<br/>— PARENT span begins,<br/>overall_start = time.time()"]
+
+    SPAN1 --> TRYBLOCK{"try: block wraps<br/>the whole pipeline"}
+
+    TRYBLOCK --> RETRIEVEFN["retrieve(query)<br/>child span 'retrieval' opens"]
+    RETRIEVEFN --> KEYWORDMATCH["query_words ∩ each corpus<br/>entry's words → score"]
+    KEYWORDMATCH --> ANYSCORE{"any entry has<br/>score &gt; 0?"}
+    ANYSCORE -->|"Yes"| TOPSCORED["top = highest-scoring entries<br/>(up to 2)"]
+    ANYSCORE -->|"No (zero keyword overlap)"| FALLBACK["top = [scored[0]]<br/>— fallback to the single<br/>highest-scoring (even if 0)<br/>entry, never empty"]
+
+    TOPSCORED --> SPANATTR1["span.set_attribute('chunks_retrieved', len(top))<br/>STAGE_LATENCY.labels('retrieval').observe()"]
+    FALLBACK --> SPANATTR1
+
+    SPANATTR1 --> ASSEMBLEFN["assemble_context(chunks)<br/>child span 'context_assembly'"]
+    ASSEMBLEFN --> EMPTYCTX{"chunks list<br/>is empty?"}
+    EMPTYCTX -->|"Yes"| EMPTYSTR["context = '' (join of nothing)"]
+    EMPTYCTX -->|"No"| JOINED["context = joined chunk texts<br/>with [doc_id] headers"]
+
+    EMPTYSTR --> TOKENCOUNT["TOKENS_TOTAL.labels('context_assembly')<br/>.inc(token_count)"]
+    JOINED --> TOKENCOUNT
+
+    TOKENCOUNT --> GENFN["generate(query, context)<br/>child span 'generation'"]
+    GENFN --> LLMINVOKE["ChatOllama.invoke(...)<br/>— can raise an exception"]
+
+    LLMINVOKE --> EXCEPT{"exception raised<br/>anywhere in the<br/>try block above?"}
+    EXCEPT -->|"No"| SPANOK["span.set_status(Status.OK)<br/>REQUESTS_TOTAL.labels('success').inc()"]
+    EXCEPT -->|"Yes"| SPANERR["span.set_status(Status.ERROR, str(e))<br/>REQUESTS_TOTAL.labels('error').inc()<br/>re-raises the exception"]
+
+    SPANOK --> FINALLY["finally: block always runs<br/>REQUEST_LATENCY.observe(total_latency)<br/>span.set_attribute('total_latency_sec', ...)"]
+    SPANERR --> FINALLY
+
+    FINALLY --> RETURNRESULT(["return {query, answer,<br/>sources, latency_sec}<br/>(or exception propagates<br/>after finally runs)"])
+
+    classDef startNode fill:#D9F0E5,stroke:#1F8F63,stroke-width:2px
+    classDef decisionNode fill:#FBF3E6,stroke:#B5701F,stroke-width:2px
+    classDef endNode fill:#E8EBEE,stroke:#8993A0,stroke-width:2px
+    classDef warnNode fill:#F7DEDA,stroke:#C23B2E,stroke-width:2px
+    class START startNode
+    class ANYSCORE,EMPTYCTX,EXCEPT decisionNode
+    class RETURNRESULT endNode
+    class SPANERR warnNode

@@ -1,0 +1,45 @@
+flowchart TD
+    START(["train.py : train()"]) --> LOADDATA["load_data():<br/>keras.datasets.mnist.load_data()<br/>— REAL API BUG hit twice here"]
+
+    LOADDATA --> APIATTEMPT{"which load_data()<br/>call signature actually<br/>works on this Keras version?"}
+    APIATTEMPT -->|"Attempt 1: path=&lt;full path&gt;"| ATTEMPT1FAIL["ValueError: 'Paths are no<br/>longer accepted... use cache_dir'"]
+    APIATTEMPT -->|"Attempt 2: cache_dir=..."| ATTEMPT2FAIL["TypeError: 'unexpected<br/>keyword argument cache_dir'<br/>— the error's OWN suggested<br/>fix didn't work either"]
+    APIATTEMPT -->|"Attempt 3 (fix): inspect.signature()<br/>revealed the real signature:<br/>load_data(path='mnist.npz')"| WORKS["bare filename only,<br/>resolved under Keras' own<br/>~/.keras/datasets/ cache"]
+
+    ATTEMPT1FAIL -.-> APIATTEMPT
+    ATTEMPT2FAIL -.-> APIATTEMPT
+    WORKS --> BUILDDS["tf.data.Dataset.from_tensor_slices(<br/>(x_train, y_train))<br/>.shuffle(1000).batch(64)"]
+
+    BUILDDS --> COMPILE["model.compile(optimizer='adam',<br/>loss=SparseCategoricalCrossentropy(<br/>from_logits=True))"]
+    COMPILE --> FITCALL["model.fit(train_ds, validation_data=test_ds,<br/>epochs=5, callbacks=[...])"]
+
+    FITCALL --> EPOCHLOOP{"Keras internal loop:<br/>for epoch in range(5)"}
+    EPOCHLOOP --> VALCHECK["after each epoch:<br/>EarlyStopping callback checks<br/>val_accuracy"]
+    VALCHECK --> IMPROVED{"val_accuracy improved<br/>vs. best so far?"}
+    IMPROVED -->|"Yes"| SAVEBEST["ModelCheckpoint callback:<br/>save_best_only=True<br/>→ overwrites model_checkpoint.keras"]
+    IMPROVED -->|"No, for patience (2)<br/>consecutive epochs"| STOPEARLY["EarlyStopping triggers:<br/>restore_best_weights=True<br/>→ training stops before<br/>epoch 5 if no improvement"]
+    SAVEBEST --> EPOCHLOOP
+    EPOCHLOOP -->|"5 epochs done OR<br/>early-stopped"| TRAINDONE(["measured: 92.5% test accuracy<br/>(0.6618 → 0.9507 train acc<br/>across epochs)"])
+    STOPEARLY --> TRAINDONE
+
+    TRAINDONE --> EXPORTCALL["export_tflite.py : export_to_tflite(model)"]
+    EXPORTCALL --> CONVERTER["tf.lite.TFLiteConverter<br/>.from_keras_model(model).convert()"]
+    CONVERTER --> COMPARELOOP{"for i in range(20)<br/>held-out samples"}
+    COMPARELOOP --> KERASPRED["model.predict(sample) → keras_pred"]
+    COMPARELOOP --> TFLITEPRED["interpreter.invoke() → tflite_pred<br/>(SEPARATE inference engine)"]
+    KERASPRED --> AGREECHECK{"keras_pred ==<br/>tflite_pred?"}
+    TFLITEPRED --> AGREECHECK
+    AGREECHECK -->|"Yes (measured: 20/20)"| MATCH["agreement += 1"]
+    AGREECHECK -->|"No"| MISMATCH["would indicate the export<br/>changed model behavior —<br/>NOT observed"]
+    MATCH --> COMPARELOOP
+    MISMATCH --> COMPARELOOP
+    COMPARELOOP -->|"all 20 checked"| FINALRESULT(["100% prediction agreement,<br/>67.9% smaller file"])
+
+    classDef startNode fill:#D9F0E5,stroke:#1F8F63,stroke-width:2px
+    classDef decisionNode fill:#FBF3E6,stroke:#B5701F,stroke-width:2px
+    classDef endNode fill:#E8EBEE,stroke:#8993A0,stroke-width:2px
+    classDef warnNode fill:#F7DEDA,stroke:#C23B2E,stroke-width:2px
+    class START startNode
+    class APIATTEMPT,EPOCHLOOP,IMPROVED,COMPARELOOP,AGREECHECK decisionNode
+    class TRAINDONE,FINALRESULT endNode
+    class ATTEMPT1FAIL,ATTEMPT2FAIL warnNode

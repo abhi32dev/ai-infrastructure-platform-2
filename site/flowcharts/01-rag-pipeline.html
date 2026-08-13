@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flowchart — RAG-from-Scratch Pipeline</title>
+<link rel="stylesheet" href="../vendor/flowchart.css">
+</head>
+<body>
+  <div class="topbar">
+    <div class="topbar-inner">
+      <span class="mono" style="font-size:12.5px;color:var(--text-tertiary)">SVC-01 · RAG-FROM-SCRATCH PIPELINE</span>
+      <div class="topbar-links">
+        <a href="index.html">← all flowcharts</a>
+        <a href="../index.html">portfolio home</a>
+        <a href="https://github.com/abhi32dev/ai-infrastructure-platform-2/tree/main/01-rag-pipeline" target="_blank" rel="noopener">view source ↗</a>
+      </div>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <section class="hero">
+      <div class="eyebrow">Logic flow · 01-rag-pipeline/</div>
+      <h1>How the RAG pipeline actually decides what to do</h1>
+      <p class="hero-sub">
+        Two real entry points — the CLI (<code>pipeline.py</code>) and the FastAPI
+        service (<code>app.py</code>) — both route through the same underlying
+        stage functions. The diagram below traces every conditional branch that
+        actually exists in the code: when the index gets rebuilt vs. reused,
+        how a query becomes retrieved chunks, and how those chunks become a
+        grounded (or explicitly refused) answer. Every box names the exact
+        <code>file.py:function()</code> that executes it.
+      </p>
+    </section>
+
+    <div class="section-head"><h2>Legend</h2></div>
+    <div class="legend">
+      <div class="legend-item"><span class="legend-swatch start"></span> Entry point / start</div>
+      <div class="legend-item"><span class="legend-swatch process"></span> Function call (does work)</div>
+      <div class="legend-item"><span class="legend-swatch decision"></span> Real conditional in the code</div>
+      <div class="legend-item"><span class="legend-swatch terminal"></span> Output / end state</div>
+    </div>
+
+    <div class="section-head"><h2>Full logic flow</h2><span class="hint">rendered SVG — zoom with your browser (Cmd/Ctrl +) for full detail</span></div>
+    <div class="diagram-card">
+      <img class="diagram-svg" src="svg/01-rag-pipeline.svg" alt="Flowchart: RAG-from-Scratch Pipeline logic flow" loading="lazy">
+    </div>
+    <p class="diagram-note">Diagram legend colors: green = start, amber diamond = real conditional branch in the code, grey = terminal/output state, white = a function doing work.</p>
+
+    <div class="section-head"><h2>Node-by-node reference</h2><span class="hint">exactly which file, which function, what it checks</span></div>
+    <table class="ref-table">
+      <tr><th>Node</th><th>Location</th><th>What it does</th></tr>
+      <tr><td class="node-id">ENTRY</td><td class="loc">—</td><td class="desc">There are genuinely two independent code paths into this system: the <b>CLI</b> (<code>pipeline.py</code>, run once per invocation) and the <b>HTTP service</b> (<code>app.py</code>, long-running, handles many requests). Both converge on the same <code>answer()</code> function.</td></tr>
+      <tr><td class="node-id">CHECK1 / CHECK2</td><td class="loc">pipeline.py:22<br>app.py:26</td><td class="desc">The single most important conditional in this project: <b>should the vector index be rebuilt?</b> The CLI checks <code>args.rebuild OR not CHROMA_DIR.exists()</code>; the FastAPI startup hook checks only <code>not CHROMA_DIR.exists()</code> (it never force-rebuilds on every restart — only when there's no index on disk at all).</td></tr>
+      <tr><td class="node-id">BUILDIDX</td><td class="loc">embed_index.py:build_index()</td><td class="desc">Wipes the existing Chroma directory (<code>shutil.rmtree</code>) if present, then rebuilds from scratch. This is a full rebuild every time — there's no incremental/upsert path (documented as a known gap in <code>PRODUCTION.md</code>).</td></tr>
+      <tr><td class="node-id">INGEST → CHUNK → EMBED → INDEXED</td><td class="loc">ingest.py / chunking.py / embed_index.py</td><td class="desc">The four stages run strictly in sequence, each one's output feeding the next — no branching inside this part of the pipeline. This is deliberate: project 01's whole design point is that each stage is independently inspectable (each file has its own <code>if __name__ == "__main__"</code> block for exactly this reason).</td></tr>
+      <tr><td class="node-id">RETRIEVE</td><td class="loc">retrieve.py:retrieve()</td><td class="desc">Embeds the incoming query with the <b>same</b> embedding model used at index time, then does <code>similarity_search_with_score(query, k)</code> against Chroma. <code>k</code> defaults to <code>RETRIEVAL_K=4</code> from <code>config.py</code> but can be overridden per-call.</td></tr>
+      <tr><td class="node-id">GROUNDCHECK</td><td class="loc">generate.py (SYSTEM_PROMPT)<br>+ tests/test_pipeline.py</td><td class="desc">This is <b>not a code-level if/else</b> — it's the model's own judgment, shaped by the system prompt's explicit instruction to refuse when context doesn't contain the answer. The code doesn't branch here; what's tested is that the model's <i>behavior</i> branches correctly (<code>test_generation_is_grounded_and_refuses_out_of_scope</code> asserts refusal language appears for an out-of-corpus question).</td></tr>
+      <tr><td class="node-id">OUTFORMAT</td><td class="loc">pipeline.py:main() / app.py:query()</td><td class="desc">Three possible output shapes depending on entry point and flag: CLI human-readable text (default), CLI JSON (<code>--json</code>), or the HTTP path's Pydantic-validated JSON response body.</td></tr>
+    </table>
+
+    <div class="section-head"><h2>Concrete example paths</h2></div>
+    <div class="scenario-card">
+      <h4>First-ever run, no index exists yet</h4>
+      <p>CLI invoked with no flags → <code>CHECK1</code> is <b>No</b> (index doesn't exist) → full <code>BUILDIDX</code> chain runs (ingest→chunk→embed→index) → then <code>ANSWER1</code> proceeds normally.</p>
+      <span class="path">ENTRY → CLIMAIN → CHECK1(No) → BUILDIDX → INGEST → CHUNK → EMBED → INDEXED → ANSWER1 → RETRIEVE → ASSEMBLE → LLMCALL → GROUNDCHECK → OUTFORMAT → TEXTOUT</span>
+    </div>
+    <div class="scenario-card">
+      <h4>Second run, same index, asking an in-corpus question</h4>
+      <p><code>CHECK1</code> is <b>Yes</b> this time (index already on disk, no <code>--rebuild</code>) → skips straight past the entire ingest/chunk/embed chain → retrieval finds a real match → model answers grounded, citing the source doc.</p>
+      <span class="path">ENTRY → CLIMAIN → CHECK1(Yes) → ANSWER1 → RETRIEVE → ASSEMBLE → LLMCALL → GROUNDCHECK(Yes) → GROUNDED → OUTFORMAT → TEXTOUT</span>
+    </div>
+    <div class="scenario-card">
+      <h4>Question with no answer in the corpus (e.g. "what's the CEO's favorite color?")</h4>
+      <p>Retrieval still returns <i>something</i> (Chroma always returns the top-k nearest vectors, even if none are relevant) — the branch that matters is entirely inside the model's response, per the system prompt's explicit instruction.</p>
+      <span class="path">... → LLMCALL → GROUNDCHECK(No) → REFUSED → OUTFORMAT → TEXTOUT</span>
+    </div>
+    <div class="scenario-card">
+      <h4>HTTP service, forced reindex via POST /reindex</h4>
+      <p>Bypasses the <code>CHECK2</code> conditional entirely — <code>/reindex</code> calls <code>build_index()</code> unconditionally, regardless of whether an index already exists (this is the one place a rebuild can be forced on a running service without restarting it).</p>
+      <span class="path">POST /reindex → app.py:reindex() → embed_index.build_index() → returns {"status": "reindexed", "vector_count": N}</span>
+    </div>
+
+    <div class="footer-nav">
+      <a href="index.html">← back to all flowcharts</a>
+      <a href="https://github.com/abhi32dev/ai-infrastructure-platform-2/tree/main/01-rag-pipeline" target="_blank" rel="noopener">01-rag-pipeline source ↗</a>
+    </div>
+  </div>
+
+</body>
+</html>

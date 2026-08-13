@@ -1,0 +1,44 @@
+flowchart TD
+    START(["route_and_answer(question)"]) --> CLASSIFY["router.py : classify(question)<br/>ChatOllama(SMALL_MODEL, format=json)<br/>CLASSIFY_PROMPT asks SIMPLE or COMPLEX"]
+
+    CLASSIFY --> PARSE{"json.loads(raw)<br/>succeeds?"}
+    PARSE -->|"No"| FAILSAFE1["fail-safe: tier = 'COMPLEX'<br/>(ambiguous → route to the<br/>STRONGER model, not the cheaper one)"]
+    PARSE -->|"Yes"| VALIDTIER{"tier in<br/>('SIMPLE','COMPLEX')?"}
+    VALIDTIER -->|"No (model hallucinated<br/>a 3rd category)"| FAILSAFE2["fail-safe: tier = 'COMPLEX'"]
+    VALIDTIER -->|"Yes"| TIEROK["tier = parsed value"]
+
+    FAILSAFE1 --> ROUTE
+    FAILSAFE2 --> ROUTE
+    TIEROK --> ROUTE
+
+    ROUTE{"tier == 'SIMPLE'?"}
+    ROUTE -->|"Yes"| SMALLMODEL["model_name = SMALL_MODEL<br/>(llama3.2:1b)"]
+    ROUTE -->|"No"| LARGEMODEL["model_name = LARGE_MODEL<br/>(qwen2.5:3b)"]
+
+    SMALLMODEL --> GENERATE["ChatOllama(model_name).invoke(question)"]
+    LARGEMODEL --> GENERATE
+
+    GENERATE --> RETURN(["return {tier, model_used, answer}"])
+
+    RETURN -.->|"cost_report.py wraps this call"| COSTCALC["count_tokens(question) + count_tokens(answer)<br/>cost_of(model_used, total_tokens)<br/>vs. cost_of(LARGE_MODEL, total_tokens)"]
+
+    subgraph SWEEP["Separate flow: chunk_sweep.py"]
+    SSTART(["sweep()"]) --> SLOOP1{"for chunk_size<br/>in [200, 500, 1000]"}
+    SLOOP1 --> BUILDIDX["build_index(chunk_size)<br/>fresh in-memory Chroma collection"]
+    BUILDIDX --> SLOOP2{"for k<br/>in [2, 4, 6]"}
+    SLOOP2 --> RETRIEVE2["similarity_search(q, k)<br/>for each of 4 eval questions"]
+    RETRIEVE2 --> KEYWORDCHECK{"expected keyword<br/>in retrieved context?"}
+    KEYWORDCHECK -->|"Yes"| HIT["hits += 1"]
+    KEYWORDCHECK -->|"No"| MISS["no increment"]
+    HIT --> SLOOP2
+    MISS --> SLOOP2
+    SLOOP2 -->|"all k done"| SLOOP1
+    SLOOP1 -->|"all chunk_sizes done"| BEST["best = max by (hit_rate, -avg_tokens)"]
+    end
+
+    classDef startNode fill:#D9F0E5,stroke:#1F8F63,stroke-width:2px
+    classDef decisionNode fill:#FBF3E6,stroke:#B5701F,stroke-width:2px
+    classDef endNode fill:#E8EBEE,stroke:#8993A0,stroke-width:2px
+    class START,SSTART startNode
+    class PARSE,VALIDTIER,ROUTE,SLOOP1,SLOOP2,KEYWORDCHECK decisionNode
+    class RETURN,BEST endNode

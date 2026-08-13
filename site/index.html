@@ -217,6 +217,62 @@
     margin-top: 4px;
   }
 
+  /* ---- Flowcharts callout ---- */
+
+  .fc-callout {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 24px;
+    flex-wrap: wrap;
+    margin-top: 34px;
+    padding: 22px 26px;
+    border: 1px solid var(--accent);
+    border-radius: 12px;
+    background: var(--accent-soft);
+    text-decoration: none;
+  }
+
+  .fc-callout-text .fc-eyebrow {
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    font-weight: 700;
+    color: var(--accent);
+    margin-bottom: 6px;
+  }
+
+  .fc-callout-text h3 {
+    font-family: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", Menlo, Consolas, monospace;
+    font-size: 19px;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin: 0 0 6px;
+  }
+
+  .fc-callout-text p {
+    font-size: 14px;
+    color: var(--text-secondary);
+    margin: 0;
+    max-width: 56ch;
+  }
+
+  .fc-callout-cta {
+    flex-shrink: 0;
+    font-family: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", Menlo, Consolas, monospace;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    color: var(--bg);
+    background: var(--accent);
+    padding: 11px 20px;
+    border-radius: 8px;
+    white-space: nowrap;
+  }
+
+  .fc-callout:hover { background: var(--accent-soft); border-color: var(--accent-bright); }
+  .fc-callout:hover .fc-callout-cta { background: var(--accent-bright); }
+
   /* ---- Grid ---- */
 
   .section-head {
@@ -459,6 +515,21 @@
           <div class="label">Runs locally</div>
         </div>
       </div>
+
+      <a class="fc-callout" href="flowcharts/index.html">
+        <div class="fc-callout-text">
+          <div class="fc-eyebrow">Start here</div>
+          <h3>Read the logic flowcharts before the source</h3>
+          <p>
+            Every project below has a dedicated, node-by-node flowchart tracing
+            its real conditionals — every if/else, every retry, every fallback —
+            with exact <code>file.py:function()</code> references and worked
+            example paths (happy path, failure path, edge case). Start here,
+            then open the source knowing exactly what you're looking at.
+          </p>
+        </div>
+        <span class="fc-callout-cta">Open all 24 flowcharts →</span>
+      </a>
     </section>
 
     <div class="section-head">

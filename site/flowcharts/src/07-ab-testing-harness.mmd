@@ -1,0 +1,31 @@
+flowchart TD
+    START(["Which test do I need?"]) --> DATATYPE{"Outcome is binary<br/>(converted/didn't)<br/>or continuous<br/>(latency, a measurement)?"}
+
+    DATATYPE -->|"Binary"| ZTEST["two_proportion_z_test(<br/>control_successes, control_n,<br/>treatment_successes, treatment_n)"]
+    DATATYPE -->|"Continuous"| TTEST["welch_t_test(<br/>control_samples, treatment_samples)"]
+
+    ZTEST --> ZCALC["p_pool = pooled proportion<br/>se_pool = sqrt(p_pool*(1-p_pool)*(1/n1+1/n2))<br/>z = (p2-p1) / se_pool"]
+    ZCALC --> ZP["p_value = 2*(1 - norm.cdf(abs(z)))"]
+
+    TTEST --> TCALC["scipy.stats.ttest_ind(<br/>treatment, control, equal_var=False)<br/>— Welch's, NOT Student's"]
+    TCALC --> TP["p_value from scipy directly"]
+
+    ZP --> SIGCHECK
+    TP --> SIGCHECK
+
+    SIGCHECK{"significant_at_05 =<br/>bool(p_value &lt; 0.05)<br/>(explicit bool() —<br/>numpy bool caused a real<br/>test bug before this fix)"}
+
+    SIGCHECK -->|"True"| SIGRESULT(["Result: SIGNIFICANT<br/>— the observed difference is<br/>unlikely to be chance"])
+    SIGCHECK -->|"False"| NOTSIGRESULT(["Result: NOT significant<br/>— could be noise, even if the<br/>raw lift number LOOKS big"])
+
+    SIGRESULT --> EDGECASE{"p_value is NaN?<br/>(e.g. zero-variance<br/>identical samples)"}
+    NOTSIGRESULT --> EDGECASE
+    EDGECASE -->|"Yes"| NANSAFE["nan &lt; 0.05 evaluates False in Python<br/>→ NEVER falsely claims significance<br/>(the fail-safe direction)"]
+    EDGECASE -->|"No"| NORMAL(["normal numeric p-value"])
+
+    classDef startNode fill:#D9F0E5,stroke:#1F8F63,stroke-width:2px
+    classDef decisionNode fill:#FBF3E6,stroke:#B5701F,stroke-width:2px
+    classDef endNode fill:#E8EBEE,stroke:#8993A0,stroke-width:2px
+    class START startNode
+    class DATATYPE,SIGCHECK,EDGECASE decisionNode
+    class SIGRESULT,NOTSIGRESULT,NORMAL,NANSAFE endNode

@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flowchart — Multi-Model Evaluation Gate</title>
+<link rel="stylesheet" href="../vendor/flowchart.css">
+</head>
+<body>
+  <div class="topbar">
+    <div class="topbar-inner">
+      <span class="mono" style="font-size:12.5px;color:var(--text-tertiary)">SVC-02 · MULTI-MODEL EVALUATION GATE</span>
+      <div class="topbar-links">
+        <a href="index.html">← all flowcharts</a>
+        <a href="../index.html">portfolio home</a>
+        <a href="https://github.com/abhi32dev/ai-infrastructure-platform-2/tree/main/02-llm-eval-gate" target="_blank" rel="noopener">view source ↗</a>
+      </div>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <section class="hero">
+      <div class="eyebrow">Logic flow · 02-llm-eval-gate/</div>
+      <h1>The AND-gate: how two independent models decide together</h1>
+      <p class="hero-sub">
+        Every automation decision runs through <code>gate.py:run_gate()</code>,
+        which calls <b>two completely independent models</b> — a generator
+        and a judge — neither of which sees the other's reasoning. The
+        diagram traces both parallel branches, their JSON-parsing fail-safes,
+        and the AND-logic that only allows execution when <b>both</b> approve.
+      </p>
+    </section>
+
+    <div class="section-head"><h2>Legend</h2></div>
+    <div class="legend">
+      <div class="legend-item"><span class="legend-swatch start"></span> Entry point / start</div>
+      <div class="legend-item"><span class="legend-swatch process"></span> Function call (does work)</div>
+      <div class="legend-item"><span class="legend-swatch decision"></span> Real conditional in the code</div>
+      <div class="legend-item"><span class="legend-swatch terminal"></span> Output / end state</div>
+    </div>
+
+    <div class="section-head"><h2>Full logic flow</h2></div>
+    <div class="diagram-card">
+      <img class="diagram-svg" src="svg/02-llm-eval-gate.svg" alt="Flowchart: Multi-Model Evaluation Gate logic flow" loading="lazy">
+    </div>
+
+    <div class="section-head"><h2>Node-by-node reference</h2></div>
+    <table class="ref-table">
+      <tr><th>Node</th><th>Location</th><th>What it does</th></tr>
+      <tr><td class="node-id">PARALLEL</td><td class="loc">gate.py:run_gate()</td><td class="desc">Both <code>propose()</code> and <code>review()</code> are called with the <b>same raw situation text</b> — the judge never sees the generator's rationale. This is deliberate: reviewing the generator's stated reasoning would invite rubber-stamping confident-sounding but wrong logic (anchoring bias).</td></tr>
+      <tr><td class="node-id">GENPARSE / JUDGEPARSE</td><td class="loc">generator.py / judge.py</td><td class="desc">Both models are asked to respond in strict JSON. Each parse is wrapped in a <code>try/except json.JSONDecodeError</code>. On failure, the code doesn't crash — it fails safe by treating the response as <b>REJECT</b>, since an unparseable response can't be trusted as an approval.</td></tr>
+      <tr><td class="node-id">ANDGATE</td><td class="loc">gate.py:run_gate()</td><td class="desc">The actual gate logic is one line: <code>gate_approved = gen_approved and judge_approved</code>. Both must independently say APPROVE — a single REJECT (or parse failure) from either side blocks execution.</td></tr>
+      <tr><td class="node-id">EXECUTE</td><td class="loc">gate.py:execute_action()</td><td class="desc">Only reached when <code>gate_approved is True</code>. In this portfolio it's simulated (<code>[SIMULATED EXECUTION]</code>) rather than calling real infrastructure — but the gating logic upstream is exactly what would guard a real action.</td></tr>
+      <tr><td class="node-id">AUDIT</td><td class="loc">gate.py:_append_audit()</td><td class="desc">Every single decision — approved or blocked — gets one JSON line appended to <code>logs/audit.jsonl</code>. This runs unconditionally, regardless of which branch was taken above.</td></tr>
+    </table>
+
+    <div class="section-head"><h2>Concrete example paths</h2></div>
+    <div class="scenario-card">
+      <h4>Both models agree it's safe (restart_instance, already-drained)</h4>
+      <p>Generator says APPROVE, judge independently says APPROVE → AND-gate passes → action executes.</p>
+      <span class="path">PARALLEL → GEN(APPROVE) + JUDGE(APPROVE) → ANDGATE(True) → EXECUTE → AUDIT</span>
+    </div>
+    <div class="scenario-card">
+      <h4>Judge catches what the generator missed (the rollback case)</h4>
+      <p>The generator model (llama3.2:1b) sometimes over-weights "this is a production change" and REJECTs a legitimate rollback. The judge (qwen2.5:1.5b) correctly APPROVEs it. Because it's an AND-gate, the generator's mistake alone is enough to block — even though the judge got it right.</p>
+      <span class="path">PARALLEL → GEN(REJECT) + JUDGE(APPROVE) → ANDGATE(False) → BLOCKED → AUDIT</span>
+    </div>
+    <div class="scenario-card">
+      <h4>A model returns malformed JSON</h4>
+      <p>If either model's raw output fails <code>json.loads()</code>, that side's decision defaults to REJECT with a rationale describing the unparsable output — never silently treated as approval.</p>
+      <span class="path">GEN raw="not json" → GENPARSE(fails) → GENFAIL(REJECT) → ANDGATE(False) → BLOCKED</span>
+    </div>
+
+    <div class="footer-nav">
+      <a href="index.html">← back to all flowcharts</a>
+      <a href="https://github.com/abhi32dev/ai-infrastructure-platform-2/tree/main/02-llm-eval-gate" target="_blank" rel="noopener">02-llm-eval-gate source ↗</a>
+    </div>
+  </div>
+</body>
+</html>

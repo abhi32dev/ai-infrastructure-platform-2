@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How It Works — Flowcharts for All 24 Projects</title>
+<meta name="description" content="Interactive logic-flow diagrams for every project — which file, which function, which condition, in what order.">
+<link rel="stylesheet" href="../vendor/flowchart.css">
+<style>
+  .fc-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 14px;
+    margin-bottom: 8px;
+  }
+  .fc-card {
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px 18px;
+    text-decoration: none;
+    color: inherit;
+    transition: transform 0.15s ease, border-color 0.15s ease;
+  }
+  .fc-card:hover { transform: translateY(-2px); border-color: var(--accent); }
+  .fc-card .fc-id {
+    font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    font-size: 11px; color: var(--text-tertiary); font-weight: 600; margin-bottom: 8px;
+  }
+  .fc-card h3 { font-size: 14.5px; margin: 0 0 8px; font-weight: 650; }
+  .fc-card p { font-size: 12.5px; color: var(--text-secondary); margin: 0; line-height: 1.5; }
+  .fc-card .fc-arrow {
+    margin-top: 12px; font-family: ui-monospace, monospace; font-size: 11.5px;
+    color: var(--text-secondary); display: flex; justify-content: space-between;
+  }
+  .fc-card:hover .fc-arrow { color: var(--accent); }
+</style>
+</head>
+<body>
+  <div class="topbar">
+    <div class="topbar-inner">
+      <span class="mono" style="font-size:12.5px;color:var(--text-tertiary)">HOW IT WORKS</span>
+      <div class="topbar-links">
+        <a href="../index.html">← portfolio home</a>
+        <a href="https://github.com/abhi32dev/ai-infrastructure-platform-2" target="_blank" rel="noopener">repository ↗</a>
+      </div>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <section class="hero">
+      <div class="eyebrow">Logic-flow reference · all 24 projects</div>
+      <h1>How every project's logic actually flows</h1>
+      <p class="hero-sub">
+        Before you read the source, read the map. Each project below has a
+        detailed, interactive flowchart tracing its real conditional
+        branches — every <code>if</code>, every decision point, every
+        function call — with the exact <code>file.py:function()</code> that
+        executes each step, plus 3-4 concrete example paths through the
+        logic (the happy path, the failure path, the edge case). This is
+        the fastest way to understand what a project actually does before
+        opening a single line of code.
+      </p>
+    </section>
+
+    <div class="section-head"><h2>Select a project</h2></div>
+    <div class="fc-grid" id="fcgrid"></div>
+  </div>
+
+<script>
+  const projects = [
+    { id: "01", slug: "01-rag-pipeline", name: "RAG-from-Scratch Pipeline", desc: "Index-rebuild decision, retrieval, grounded-vs-refused branching, output format." },
+    { id: "02", slug: "02-llm-eval-gate", name: "Multi-Model Evaluation Gate", desc: "The AND-gate: generator decision × judge verdict × fail-safe parsing paths." },
+    { id: "03", slug: "03-mlops-versioning-ci", name: "MLflow Versioning + CI Gate", desc: "Baseline-exists check, regression comparison, --update-baseline branch." },
+    { id: "04", slug: "04-cost-aware-router", name: "Cost-Aware Model Router", desc: "SIMPLE/COMPLEX classification, fail-safe routing, chunk/k sweep loop." },
+    { id: "05", slug: "05-agent-runtime", name: "Agent Runtime (LangGraph)", desc: "Risk check → human approval branch → idempotency check → bounded retry loop." },
+    { id: "06", slug: "06-backpressure-dispatch", name: "Backpressure + Adaptive Dispatch", desc: "Worker-count formula, per-job success/retry/DLQ branching, replay loop." },
+    { id: "07", slug: "07-ab-testing-harness", name: "A/B Testing & p-Value Harness", desc: "Which test to run, significance threshold check, edge-case guards." },
+    { id: "08", slug: "08-recommender-system", name: "Matrix-Factorization Recommender", desc: "Training loop, prediction clipping, exclusion filtering, baseline floor." },
+    { id: "09", slug: "09-local-model-serving", name: "Local Model Serving Harness", desc: "The circuit breaker's 3-state machine: CLOSED → OPEN → HALF_OPEN → CLOSED." },
+    { id: "10", slug: "10-deep-learning-demo", name: "Detection & Tracking", desc: "Transfer-learning setup, IoU matching loop, track lifecycle state machine." },
+    { id: "11", slug: "11-mcp-agent-protocol", name: "MCP Agent-to-Agent Protocol", desc: "Tool discovery, delegation branch, healthy-vs-unhealthy remediation path." },
+    { id: "12", slug: "12-guardrails", name: "Guardrails Layer", desc: "The full request pipeline: rate limit → injection check → PII redact → output scan." },
+    { id: "13", slug: "13-observability", name: "Observability Stack", desc: "Span/metric emission points, success vs. error outcome branching." },
+    { id: "14", slug: "14-cost-optimization", name: "Semantic Cache & Cost Dashboard", desc: "Cache lookup similarity check: hit vs. miss, and what each path costs." },
+    { id: "15", slug: "15-distributed-training", name: "Distributed Training (DDP)", desc: "Per-rank training loop, gradient all-reduce timing, sync-vs-no-sync contrast." },
+    { id: "16", slug: "16-kubernetes-ml", name: "Kubernetes for ML Workloads", desc: "Readiness probe → Service endpoint inclusion/exclusion decision chain." },
+    { id: "17", slug: "17-inference-serving", name: "High-Perf Inference Serving", desc: "Server startup/readiness wait, concurrent request dispatch, benchmark comparison." },
+    { id: "18", slug: "18-lora-finetuning", name: "QLoRA Fine-Tuning", desc: "Quantized load → LoRA wrap → per-batch train loop → adapter-only save." },
+    { id: "19", slug: "19-quantization-onnx", name: "Quantization & ONNX Export", desc: "Train → export → quantize → the fp32-vs-int8 evaluation branch." },
+    { id: "20", slug: "20-terraform-iac", name: "Terraform IaC", desc: "Resource dependency graph: DLQ ARN → main queue redrive policy → apply order." },
+    { id: "21", slug: "21-feature-store", name: "Feature Store (Feast)", desc: "The point-in-time join: which snapshot row matches which query timestamp." },
+    { id: "22", slug: "22-ragas-deepeval", name: "Ragas & DeepEval", desc: "Two independent judge-model pipelines, concurrency tuning, failure-mode branch." },
+    { id: "23", slug: "23-tensorflow-keras", name: "TensorFlow / Keras", desc: "Callback-driven training loop, TFLite export, prediction-agreement verification." },
+    { id: "24", slug: "24-gpu-finops", name: "GPU Cost Governance", desc: "The sustained-idle-window detector: momentary dip vs. real waste." },
+  ];
+
+  document.getElementById("fcgrid").innerHTML = projects.map(p => `
+    <a class="fc-card" href="${p.slug}.html">
+      <div class="fc-id">SVC-${p.id} · FLOWCHART</div>
+      <h3>${p.name}</h3>
+      <p>${p.desc}</p>
+      <div class="fc-arrow"><span>trace the logic</span><span>→</span></div>
+    </a>
+  `).join("");
+</script>
+</body>
+</html>

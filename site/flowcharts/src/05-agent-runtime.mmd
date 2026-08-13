@@ -1,0 +1,39 @@
+flowchart TD
+    START(["graph.invoke(initial_state, config)<br/>thread_id identifies this run"]) --> CHECKSIT["check_situation(state)<br/>logs 'checked situation: ...'"]
+
+    CHECKSIT --> DECIDE["decide_action(state)<br/>requires_approval = action in RISKY_ACTIONS<br/>(delete_data, widen_network_access, force_failover)"]
+
+    DECIDE --> ROUTEDECIDE{"route_after_decision():<br/>requires_approval?"}
+    ROUTEDECIDE -->|"True"| HUMANNODE["human_approval(state)<br/>calls interrupt({message, action})<br/>→ GRAPH PAUSES HERE"]
+    ROUTEDECIDE -->|"False"| EXECNODE
+
+    HUMANNODE --> RESUME{"graph resumed later via<br/>Command(resume=True/False)<br/>— same thread_id, possibly<br/>a BRAND NEW process/checkpointer"}
+    RESUME --> ROUTEAPPROVE{"route_after_approval():<br/>state.approved == True?"}
+    ROUTEAPPROVE -->|"Yes"| EXECNODE
+    ROUTEAPPROVE -->|"No"| BLOCKEDNODE["blocked(state)<br/>status='blocked'"] --> ENDNODE1(["END"])
+
+    EXECNODE["execute_action(state)<br/>key = state.idempotency_key"] --> IDEMCHECK{"idempotency_store.py :<br/>has_been_executed(key)?<br/>(checks a JSON file on disk)"}
+    IDEMCHECK -->|"Yes"| CACHEHIT["log 'idempotency hit: ...<br/>already executed'<br/>status='executed', NO re-execution"]
+    CACHEHIT --> ENDNODE2(["END"])
+
+    IDEMCHECK -->|"No"| ATTEMPT["attempt = state.attempt + 1"]
+    ATTEMPT --> SIMFAIL{"attempt &lt;=<br/>simulate_failures?<br/>(test-hook, default 0)"}
+    SIMFAIL -->|"Yes"| MAXCHECK{"attempt &gt;=<br/>MAX_ATTEMPTS (3)?"}
+    MAXCHECK -->|"Yes"| GIVEUP["status='failed'<br/>'giving up after max attempts'"] --> ENDNODE3(["END"])
+    MAXCHECK -->|"No"| RETRYING["status='retrying'"]
+
+    RETRYING --> ROUTEEXEC{"route_after_execute():<br/>status == 'retrying'?"}
+    ROUTEEXEC -->|"Yes"| EXECNODE
+    ROUTEEXEC -->|"No"| ENDNODE4(["END"])
+
+    SIMFAIL -->|"No"| SUCCEED["mark_executed(key, result)<br/>write to idempotency_store.json<br/>status='executed'"]
+    SUCCEED --> ROUTEEXEC
+
+    classDef startNode fill:#D9F0E5,stroke:#1F8F63,stroke-width:2px
+    classDef decisionNode fill:#FBF3E6,stroke:#B5701F,stroke-width:2px
+    classDef endNode fill:#E8EBEE,stroke:#8993A0,stroke-width:2px
+    classDef warnNode fill:#F7DEDA,stroke:#C23B2E,stroke-width:2px
+    class START startNode
+    class ROUTEDECIDE,RESUME,ROUTEAPPROVE,IDEMCHECK,SIMFAIL,MAXCHECK,ROUTEEXEC decisionNode
+    class ENDNODE1,ENDNODE2,ENDNODE3,ENDNODE4 endNode
+    class GIVEUP warnNode

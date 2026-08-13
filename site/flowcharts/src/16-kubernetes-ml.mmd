@@ -1,0 +1,35 @@
+flowchart TD
+    START(["Kubernetes kubelet:<br/>every readinessProbe.periodSeconds (3s),<br/>httpGet /health on each pod"]) --> APPHEALTH["app.py : health()<br/>snapshot = breaker.snapshot()"]
+
+    APPHEALTH --> HEALTHYCALC["healthy = snapshot.state != OPEN"]
+    HEALTHYCALC --> STATUSCODE{"the REAL bug found here:<br/>what HTTP status does<br/>the response carry?"}
+
+    STATUSCODE -->|"BEFORE the fix:<br/>always 200,<br/>regardless of healthy"| BUGGED["kubelet sees HTTP 200<br/>→ ALWAYS marks pod Ready<br/>→ probe is USELESS"]
+    STATUSCODE -->|"AFTER the fix:<br/>JSONResponse(status_code=<br/>200 if healthy else 503)"| FIXED["kubelet actually distinguishes<br/>healthy vs. unhealthy pods"]
+
+    FIXED --> PROBEOUTCOME{"probe result:<br/>200 or 503?"}
+    PROBEOUTCOME -->|"200"| STAYREADY["pod stays in Ready condition<br/>→ stays in Service's<br/>Endpoints list"]
+    PROBEOUTCOME -->|"503"| FAILTHRESH{"failureThreshold (2)<br/>consecutive 503s reached?"}
+
+    FAILTHRESH -->|"No (1st failure)"| STILLREADY["pod still marked Ready<br/>(tolerating one blip)"]
+    FAILTHRESH -->|"Yes"| NOTREADY["kubelet marks pod NotReady<br/>→ Kubernetes Endpoint controller<br/>REMOVES pod IP from<br/>Service's Endpoints"]
+
+    NOTREADY --> NOTRAFFIC(["Service no longer routes<br/>any traffic to this pod<br/>— verified live by stopping<br/>Ollama and watching this happen"])
+
+    STAYREADY --> LIVENESSPATH
+    STILLREADY --> LIVENESSPATH
+    LIVENESSPATH["separately, every livenessProbe.periodSeconds<br/>(10s), SAME /health endpoint checked"] --> LIVEFAILCHECK{"failureThreshold (5)<br/>consecutive failures?<br/>— deliberately MORE tolerant<br/>than readiness"}
+    LIVEFAILCHECK -->|"No"| PODALIVE(["pod keeps running"])
+    LIVEFAILCHECK -->|"Yes"| RESTARTPOD(["kubelet RESTARTS the container<br/>— only for a truly stuck process,<br/>not a transient downstream outage"])
+
+    NOTREADY -.->|"real gap found:<br/>HALF_OPEN state"| HALFOPENGAP["breaker auto-transitions<br/>OPEN → HALF_OPEN after cooldown,<br/>and HALF_OPEN counts as 'healthy'<br/>— but /health NEVER actively<br/>pings Ollama itself"]
+    HALFOPENGAP --> STALEHEALTHY(["with NO real /generate traffic,<br/>pod can read 'ready=true' again<br/>even though Ollama is STILL DOWN<br/>— documented, not silently fixed"])
+
+    classDef startNode fill:#D9F0E5,stroke:#1F8F63,stroke-width:2px
+    classDef decisionNode fill:#FBF3E6,stroke:#B5701F,stroke-width:2px
+    classDef endNode fill:#E8EBEE,stroke:#8993A0,stroke-width:2px
+    classDef warnNode fill:#F7DEDA,stroke:#C23B2E,stroke-width:2px
+    class START startNode
+    class STATUSCODE,PROBEOUTCOME,FAILTHRESH,LIVEFAILCHECK decisionNode
+    class STAYREADY,PODALIVE endNode
+    class NOTRAFFIC,RESTARTPOD,BUGGED,STALEHEALTHY warnNode

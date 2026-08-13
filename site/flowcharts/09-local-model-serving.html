@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flowchart — Local Model Serving Harness</title>
+<link rel="stylesheet" href="../vendor/flowchart.css">
+</head>
+<body>
+  <div class="topbar">
+    <div class="topbar-inner">
+      <span class="mono" style="font-size:12.5px;color:var(--text-tertiary)">SVC-09 · LOCAL MODEL SERVING HARNESS</span>
+      <div class="topbar-links">
+        <a href="index.html">← all flowcharts</a>
+        <a href="../index.html">portfolio home</a>
+        <a href="https://github.com/abhi32dev/ai-infrastructure-platform-2/tree/main/09-local-model-serving" target="_blank" rel="noopener">view source ↗</a>
+      </div>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <section class="hero">
+      <div class="eyebrow">Logic flow · 09-local-model-serving/</div>
+      <h1>The circuit breaker's full state machine, traced end to end</h1>
+      <p class="hero-sub">This is the one project in the portfolio where the interesting logic IS the state machine. The diagram follows a real request through the breaker’s CLOSED → OPEN → HALF_OPEN → CLOSED cycle, including the exact transition conditions.</p>
+    </section>
+
+    <div class="section-head"><h2>Legend</h2></div>
+    <div class="legend">
+      <div class="legend-item"><span class="legend-swatch start"></span> Entry point / start</div>
+      <div class="legend-item"><span class="legend-swatch process"></span> Function call (does work)</div>
+      <div class="legend-item"><span class="legend-swatch decision"></span> Real conditional in the code</div>
+      <div class="legend-item"><span class="legend-swatch terminal"></span> Output / end state</div>
+    </div>
+
+    <div class="section-head"><h2>Full logic flow</h2></div>
+    <div class="diagram-card">
+      <img class="diagram-svg" src="svg/09-local-model-serving.svg" alt="Flowchart: Local Model Serving Harness logic flow" loading="lazy">
+    </div>
+
+    <div class="section-head"><h2>Node-by-node reference</h2></div>
+    <table class="ref-table">
+      <tr><th>Node</th><th>Location</th><th>What it does</th></tr>
+      <tr><td class="node-id">ALLOWCHECK</td><td class="loc">app.py:generate()</td><td class="desc"><code>breaker.allow_request()</code> is checked BEFORE any network call — this is what makes the open-circuit path a 0.001s fast-fail instead of waiting out a 30-second timeout.</td></tr>
+      <tr><td class="node-id">STATECHECK</td><td class="loc">circuit_breaker.py:record_failure()</td><td class="desc">Opens on EITHER of two conditions: already in HALF_OPEN (any failure there immediately reopens), OR <code>consecutive_failures &gt;= failure_threshold (3)</code> from CLOSED.</td></tr>
+      <tr><td class="node-id">TIMEPASS</td><td class="loc">circuit_breaker.py:state (property)</td><td class="desc">The OPEN → HALF_OPEN transition isn't triggered by any explicit call — it's computed lazily every time <code>.state</code> is read, by comparing <code>now() - _opened_at</code> against <code>cooldown_seconds</code>.</td></tr>
+      <tr><td class="node-id">PROBERESULT</td><td class="loc">circuit_breaker.py</td><td class="desc">HALF_OPEN allows exactly one real request through as a test. Success fully resets to CLOSED (zeroing the failure counter, not just the label); failure reopens and restarts the cooldown clock.</td></tr>
+    </table>
+
+    <div class="section-head"><h2>Concrete example paths</h2></div>
+    <div class="scenario-card">
+      <h4>Healthy request, circuit CLOSED</h4>
+      <p>The common case — <code>allow_request()</code> returns True, the real Ollama call succeeds, <code>record_success()</code> keeps the breaker CLOSED.</p>
+      <span class="path">ALLOWCHECK(True) → DOCALL → CALLRESULT(ok) → RECORDOK → 200</span>
+    </div>
+    <div class="scenario-card">
+      <h4>Three consecutive failures trip the breaker</h4>
+      <p>Measured directly: after exactly 3 failed calls, the 4th request never even attempts the network call — a 503 in 0.001s instead of a connection timeout.</p>
+      <span class="path">3× [DOCALL(fails) → RECORDFAIL → STATECHECK] → 3rd call: TOOPEN → 4th request: ALLOWCHECK(False) → FASTFAIL</span>
+    </div>
+    <div class="scenario-card">
+      <h4>Recovery after cooldown</h4>
+      <p>5 seconds after opening, the breaker's state read transitions to HALF_OPEN; a single successful probe request fully closes it again.</p>
+      <span class="path">TOOPEN → [5s pass] → TIMEPASS(True) → TOHALFOPEN → PROBERESULT(succeeds) → RECORDSUCCESS → CLOSED</span>
+    </div>
+
+    <div class="footer-nav">
+      <a href="index.html">← back to all flowcharts</a>
+      <a href="https://github.com/abhi32dev/ai-infrastructure-platform-2/tree/main/09-local-model-serving" target="_blank" rel="noopener">09-local-model-serving source ↗</a>
+    </div>
+  </div>
+</body>
+</html>

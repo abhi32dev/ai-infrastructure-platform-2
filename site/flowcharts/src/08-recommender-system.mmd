@@ -1,0 +1,39 @@
+flowchart TD
+    START(["MatrixFactorizationRecommender.fit(train_df, epochs)"]) --> EPOCHLOOP{"for epoch in<br/>range(epochs)"}
+
+    EPOCHLOOP --> SHUFFLE["shuffle training rows<br/>(rng seeded, deterministic)"]
+    SHUFFLE --> ROWLOOP{"for (u, i, r)<br/>in rows"}
+
+    ROWLOOP --> PREDICT["pred = global_mean + user_bias[u]<br/>+ item_bias[i] + P[u] @ Q[i]"]
+    PREDICT --> ERROR["err = r - pred"]
+    ERROR --> SGDUPDATE["SGD step: update user_bias[u],<br/>item_bias[i], P[u], Q[i]<br/>using err * learning_rate - reg penalty"]
+    SGDUPDATE --> ROWLOOP
+
+    ROWLOOP -->|"all rows done"| EPOCHLOOP
+    EPOCHLOOP -->|"all epochs done"| TRAINED(["model trained,<br/>state_dict saved"])
+
+    TRAINED --> PREDICTCALL["predict(user_id, item_id)"]
+    PREDICTCALL --> CLIP["np.clip(raw_prediction, 1, 5)<br/>always clamps to valid rating range,<br/>even for an untrained/random model"]
+    CLIP --> PREDICTED(["returns float in [1, 5]"])
+
+    TRAINED --> RECOMMEND["recommend_top_k(user_id, k, exclude_items)"]
+    RECOMMEND --> SCORES["scores = global_mean + user_bias[u]<br/>+ item_bias + Q @ P[u]<br/>(vectorized over ALL items at once)"]
+    SCORES --> SORTRANK["ranked = argsort(-scores)"]
+    SORTRANK --> FILTERLOOP{"for i in ranked:<br/>i in exclude_items?"}
+    FILTERLOOP -->|"Yes → skip"| FILTERLOOP
+    FILTERLOOP -->|"No → keep"| TRUNCATE["keep first k items"]
+    TRUNCATE --> RECRESULT(["returns list of up to k item_ids<br/>(fewer if catalog is smaller than k,<br/>or all items excluded)"])
+
+    subgraph BASELINE["baseline.py : PopularityBaseline.fit()"]
+    BSTART(["fit(train_df)"]) --> GROUPBY["groupby(item_id).agg(mean, count)"]
+    GROUPBY --> FLOOR{"count &gt;=<br/>MIN_RATINGS (20)?"}
+    FLOOR -->|"No → exclude"| EXCLUDED["item never appears in<br/>ranked_items, regardless<br/>of how high its mean rating is"]
+    FLOOR -->|"Yes → include"| INCLUDED["item eligible, sorted<br/>by mean rating descending"]
+    end
+
+    classDef startNode fill:#D9F0E5,stroke:#1F8F63,stroke-width:2px
+    classDef decisionNode fill:#FBF3E6,stroke:#B5701F,stroke-width:2px
+    classDef endNode fill:#E8EBEE,stroke:#8993A0,stroke-width:2px
+    class START,BSTART startNode
+    class EPOCHLOOP,ROWLOOP,FILTERLOOP,FLOOR decisionNode
+    class PREDICTED,RECRESULT,TRAINED endNode

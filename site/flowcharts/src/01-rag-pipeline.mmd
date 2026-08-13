@@ -1,0 +1,37 @@
+flowchart TD
+    START(["CLI: python pipeline.py &quot;question&quot;<br/>or HTTP: POST /query"]) --> ENTRY{"Entry point?"}
+
+    ENTRY -->|"CLI"| CLIMAIN["pipeline.py : main()<br/>parses argv, --rebuild, --json flags"]
+    ENTRY -->|"HTTP request"| APPSTART["app.py : ensure_index()<br/>@app.on_event('startup')"]
+
+    CLIMAIN --> CHECK1{"CHROMA_DIR exists<br/>AND NOT --rebuild?"}
+    APPSTART --> CHECK2{"CHROMA_DIR.exists()?"}
+
+    CHECK1 -->|"No -> must (re)build"| BUILDIDX
+    CHECK1 -->|"Yes -> reuse existing index"| ANSWER1
+
+    CHECK2 -->|"No -> build on startup"| BUILDIDX
+    CHECK2 -->|"Yes -> skip, server starts immediately"| READY["server ready,<br/>waiting for /query calls"]
+
+    BUILDIDX["embed_index.py : build_index()<br/>shutil.rmtree(CHROMA_DIR) if exists"] --> INGEST
+    INGEST["ingest.py : load_documents()<br/>glob *.md in data/, read each file"] --> CHUNK
+    CHUNK["chunking.py : chunk_documents()<br/>RecursiveCharacterTextSplitter,<br/>CHUNK_SIZE=500 / OVERLAP=80"] --> EMBED
+    EMBED["OllamaEmbeddings(nomic-embed-text)<br/>.embed each chunk"] --> INDEXED
+    INDEXED["Chroma.from_documents()<br/>persist_directory=CHROMA_DIR"] --> ANSWER1
+    INDEXED --> READY
+
+    ANSWER1["generate.py : answer(query, k)"] --> RETRIEVE
+    RETRIEVE["retrieve.py : retrieve(query, k)<br/>get_vectordb() -> similarity_search_with_score()"] --> ASSEMBLE
+    ASSEMBLE["generate.py : assemble_context(retrieved)<br/>joins chunks with [Source: doc_id] headers"] --> LLMCALL
+    LLMCALL["ChatOllama.invoke([SystemMessage, HumanMessage])<br/>SYSTEM_PROMPT forces context-only answers"] --> GROUNDCHECK
+
+    GROUNDCHECK{"Does context actually<br/>contain the answer?<br/>model judgment,<br/>enforced by system prompt"}
+    GROUNDCHECK -->|"Yes"| GROUNDED["Model answers from context,<br/>cites source doc_id"]
+    GROUNDCHECK -->|"No"| REFUSED["Model explicitly refuses,<br/>verified by test"]
+
+    GROUNDED --> OUTFORMAT{"--json flag<br/>CLI only?"}
+    REFUSED --> OUTFORMAT
+
+    OUTFORMAT -->|"Yes"| JSONOUT(["print(json.dumps(result))"])
+    OUTFORMAT -->|"No"| TEXTOUT(["print Q/A/Sources"])
+    OUTFORMAT -->|"HTTP"| HTTPOUT(["return QueryResponse JSON"])

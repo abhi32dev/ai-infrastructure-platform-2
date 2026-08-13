@@ -1,0 +1,39 @@
+flowchart TD
+    START(["terraform apply -auto-approve"]) --> INIT["provider 'aws' block:<br/>endpoints override → localhost:4566<br/>(LocalStack, not real AWS)"]
+
+    INIT --> BUILDGRAPH["Terraform builds a<br/>dependency graph from<br/>resource references"]
+
+    BUILDGRAPH --> DEPCHECK{"does aws_sqs_queue.ingestion<br/>reference aws_sqs_queue.ingestion_dlq.arn<br/>in its redrive_policy?"}
+    DEPCHECK -->|"Yes — real dependency"| ORDERED["Terraform MUST create<br/>ingestion_dlq BEFORE<br/>ingestion (implicit ordering)"]
+    DEPCHECK -->|"(hypothetical: no reference)"| PARALLEL_CREATE["would be created in<br/>parallel — NOT what happens here"]
+
+    ORDERED --> CREATEDLQ["aws_sqs_queue.ingestion_dlq created<br/>message_retention_seconds=1209600"]
+    CREATEDLQ --> GETARN["Terraform reads back<br/>the DLQ's real ARN from<br/>LocalStack's response"]
+    GETARN --> CREATEMAIN["aws_sqs_queue.ingestion created<br/>WITH redrive_policy JSON containing<br/>the real DLQ ARN + maxReceiveCount=3"]
+
+    BUILDGRAPH --> INDEPENDENT["aws_s3_bucket.checkpoints and<br/>aws_dynamodb_table.idempotency<br/>have NO dependency on each other<br/>or on the queues"]
+    INDEPENDENT --> PARALLELCREATE["created IN PARALLEL<br/>(observed: all finished<br/>within the same few seconds)"]
+
+    PARALLELCREATE --> VERSIONING["aws_s3_bucket_versioning depends<br/>on the bucket existing first<br/>→ created right after checkpoints bucket"]
+
+    CREATEMAIN --> ALLDONE(["'Apply complete!<br/>Resources: 5 added'"])
+    VERSIONING --> ALLDONE
+
+    ALLDONE --> VERIFYSCRIPT["verify_resources.py :<br/>run_all_verifications(<br/>bucket_name, table_name, queue_url)<br/>— reads these from<br/>'terraform output -json',<br/>NEVER hardcoded"]
+
+    VERIFYSCRIPT --> S3TEST["verify_s3(): put_object() then<br/>get_object() — real write+read"]
+    VERIFYSCRIPT --> DDBTEST["verify_dynamodb(): put_item() then<br/>get_item() — real write+read"]
+    VERIFYSCRIPT --> SQSTEST["verify_sqs(): send_message() then<br/>receive_message() — real write+read"]
+
+    S3TEST --> ALLPASS{"all 3 round-trips<br/>succeeded?"}
+    DDBTEST --> ALLPASS
+    SQSTEST --> ALLPASS
+    ALLPASS -->|"Yes"| VERIFIED(["'All Terraform-provisioned<br/>resources verified usable,<br/>not just created.'"])
+    ALLPASS -->|"No"| ASSERTFAIL(["AssertionError raised —<br/>would mean apply succeeded<br/>but the resource isn't<br/>actually functional"])
+
+    classDef startNode fill:#D9F0E5,stroke:#1F8F63,stroke-width:2px
+    classDef decisionNode fill:#FBF3E6,stroke:#B5701F,stroke-width:2px
+    classDef endNode fill:#E8EBEE,stroke:#8993A0,stroke-width:2px
+    class START startNode
+    class DEPCHECK,ALLPASS decisionNode
+    class ALLDONE,VERIFIED endNode

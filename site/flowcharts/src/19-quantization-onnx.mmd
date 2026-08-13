@@ -1,0 +1,36 @@
+flowchart TD
+    START(["train_and_export.py : run_full_pipeline()"]) --> TRAINCNN["train_model(train_ds)<br/>standard PyTorch loop,<br/>SmallCNN on real MNIST subset"]
+
+    TRAINCNN --> EXPORTONNX["export_to_onnx(model, FP32_ONNX_PATH)"]
+    EXPORTONNX --> EXPORTMODE{"torch.onnx.export(...,<br/>dynamo=True/False)?"}
+    EXPORTMODE -->|"dynamo=True (new default)<br/>— REAL BUG HIT HERE"| DYNAMOFAIL["graph shape-inference conflict:<br/>onnxruntime.quantize_dynamic<br/>raises InferenceError"]
+    DYNAMOFAIL --> SWITCHFIX["fix applied: dynamo=False<br/>(legacy TorchScript exporter)"]
+    EXPORTMODE -->|"dynamo=False<br/>(after the fix)"| LEGACYOK["produces a conventional graph<br/>quantize_dynamic can process"]
+    SWITCHFIX --> LEGACYOK
+
+    LEGACYOK --> QUANTIZE["quantize_dynamic(FP32_ONNX_PATH,<br/>INT8_ONNX_PATH,<br/>weight_type=QUInt8)"]
+
+    QUANTIZE --> EVALBOTH["evaluate_onnx() called TWICE:<br/>once per model file"]
+    EVALBOTH --> BATCHLOOP{"for X, y in<br/>DataLoader(test_ds)"}
+    BATCHLOOP --> ORTRUN["session.run(None, {'input': X})<br/>— real onnxruntime inference"]
+    ORTRUN --> ACCTRACK["preds = argmax(outputs)<br/>correct += (preds == y).sum()"]
+    ACCTRACK --> LATTRACK["latencies.append(time.time() - start)"]
+    LATTRACK --> BATCHLOOP
+    BATCHLOOP -->|"all batches done"| STATS["return {accuracy, file_size_bytes,<br/>avg_batch_latency_sec}"]
+
+    STATS --> COMPARERESULTS{"compare fp32_stats<br/>vs. int8_stats"}
+    COMPARERESULTS --> SIZECHECK["size_reduction =<br/>1 - int8_size/fp32_size<br/>(measured: -72.3%)"]
+    COMPARERESULTS --> ACCCHECK["accuracy_delta =<br/>int8_acc - fp32_acc<br/>(measured: +0.003, no regression)"]
+    COMPARERESULTS --> LATCHECK{"int8_latency &lt;<br/>fp32_latency?<br/>(the assumption most<br/>people would make)"}
+
+    LATCHECK -->|"Expected: Yes<br/>(quantized = faster)"| EXPECTEDFAST(["NOT what happened"])
+    LATCHECK -->|"Actual measured result:<br/>No — INT8 was 3-4x SLOWER<br/>(reproduced across 2 more runs)"| ACTUALSLOW(["real finding: dynamic quantization's<br/>runtime dequantization overhead<br/>exceeded the compute savings<br/>on this small model / this CPU"])
+
+    classDef startNode fill:#D9F0E5,stroke:#1F8F63,stroke-width:2px
+    classDef decisionNode fill:#FBF3E6,stroke:#B5701F,stroke-width:2px
+    classDef endNode fill:#E8EBEE,stroke:#8993A0,stroke-width:2px
+    classDef warnNode fill:#F7DEDA,stroke:#C23B2E,stroke-width:2px
+    class START startNode
+    class EXPORTMODE,BATCHLOOP,COMPARERESULTS,LATCHECK decisionNode
+    class STATS endNode
+    class DYNAMOFAIL,ACTUALSLOW warnNode

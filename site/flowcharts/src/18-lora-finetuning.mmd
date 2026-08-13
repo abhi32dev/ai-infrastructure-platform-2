@@ -1,0 +1,38 @@
+flowchart TD
+    START(["train_qlora.py : train()"]) --> LOADQUANT["load_quantized_base()<br/>BitsAndBytesConfig(load_in_4bit=True)<br/>AutoModelForCausalLM.from_pretrained(<br/>BASE_MODEL, quantization_config=...)"]
+
+    LOADQUANT --> VERIFYQUANT["count_quantized_linear_layers(model)<br/>counts modules where<br/>type(m).__name__ == 'Linear4bit'"]
+    VERIFYQUANT --> QUANTCHECK{"count &gt; 0?<br/>(proves REAL quantization,<br/>not silent fp32 fallback —<br/>this was tested directly,<br/>not assumed)"}
+    QUANTCHECK -->|"No (would mean<br/>quantization silently failed)"| QUANTFAIL(["test would fail here —<br/>never observed on this hardware"])
+    QUANTCHECK -->|"Yes (verified: 24 layers)"| PROCEED["proceed to LoRA wrapping"]
+
+    PROCEED --> PREPKBIT["prepare_model_for_kbit_training(base_model)<br/>— freezes quantized base weights,<br/>enables gradient checkpointing"]
+    PREPKBIT --> LORAWRAP["get_peft_model(base_model, LoraConfig(<br/>r=8, target_modules=['c_attn']))<br/>— injects small trainable<br/>adapter matrices"]
+
+    LORAWRAP --> COUNTPARAMS["trainable_param_stats(model):<br/>trainable = sum(p.numel() for p<br/>in model.parameters() if p.requires_grad)"]
+    COUNTPARAMS --> PCTCHECK{"trainable / total<br/>&lt; 5%?<br/>(measured: 0.242%)"}
+    PCTCHECK -->|"Yes — parameter efficient,<br/>as designed"| TRAINLOOP
+    PCTCHECK -->|"No — would mean LoRA<br/>scoping broke, whole model<br/>became trainable"| SCOPEFAIL(["regression test would<br/>catch this"])
+
+    TRAINLOOP{"for epoch in<br/>range(EPOCHS=8)"} --> BATCHLOOP{"for start in<br/>range(0, n_examples, BATCH_SIZE)"}
+    BATCHLOOP --> FORWARD["model(input_ids, attention_mask,<br/>labels) → loss<br/>(labels=-100 at padding<br/>positions, ignored in loss)"]
+    FORWARD --> BACKWARD["loss.backward()<br/>ONLY updates the LoRA adapter's<br/>147,456 params — base stays frozen"]
+    BACKWARD --> BATCHLOOP
+    BATCHLOOP -->|"epoch done"| TRAINLOOP
+    TRAINLOOP -->|"all epochs done<br/>(loss: 5.18 → 4.06)"| SAVEADAPTER["model.save_pretrained(OUTPUT_DIR)<br/>— saves ONLY the adapter<br/>(591KB), not the base model"]
+
+    SAVEADAPTER --> EVALCALL["evaluate.py : compare()"]
+    EVALCALL --> LOADFRESH["load a SECOND fresh copy<br/>of the base model<br/>(no adapter) for fair comparison"]
+    LOADFRESH --> GENLOOP{"for each held-out<br/>question"}
+    GENLOOP --> GENBASE["generate(base_only, ...)<br/>greedy decoding, no adapter"]
+    GENBASE --> GENFT["generate(fine_tuned, ...)<br/>same prompt, WITH adapter applied"]
+    GENFT --> COMPARE_OUT["print BEFORE vs. AFTER<br/>— honest result: neither is<br/>fluent at this scale, but AFTER<br/>measurably shifts toward<br/>training-data phrasing"]
+    COMPARE_OUT --> GENLOOP
+    GENLOOP -->|"all questions done"| DONE(["comparison complete"])
+
+    classDef startNode fill:#D9F0E5,stroke:#1F8F63,stroke-width:2px
+    classDef decisionNode fill:#FBF3E6,stroke:#B5701F,stroke-width:2px
+    classDef endNode fill:#E8EBEE,stroke:#8993A0,stroke-width:2px
+    class START startNode
+    class QUANTCHECK,PCTCHECK,TRAINLOOP,BATCHLOOP,GENLOOP decisionNode
+    class DONE,PROCEED endNode
