@@ -97,7 +97,7 @@ not explicitly named on the resume, but expected knowledge at Staff level)
   Stack: OpenTelemetry SDK, Prometheus, Grafana (Docker Compose), applied
   to project 01's RAG pipeline as the traced system
 
-- [ ] **14 — Cost optimization deep-dive: caching & dashboard** (`14-cost-optimization/`)
+- [x] **14 — Cost optimization deep-dive: caching & dashboard** (`14-cost-optimization/`) — has its own `.venv/`. Real calibration finding (0.92 guess -> 0 hits; recalibrated to 0.75 from measured similarities). 27% cost savings measured, HTML dashboard verified rendering.
   What: extends project 04 with a semantic response cache (skip the LLM
   call entirely for a near-duplicate query), a request-level cost ledger,
   and a small dashboard visualizing spend by model/query-type over time —
