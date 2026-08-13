@@ -37,7 +37,7 @@ highest-frequency gaps between what's already built (01–14) and what these
 postings actually ask for. Ranked by how often each theme appeared.
 Sources are cited in the session this analysis came from.
 
-- [ ] **15 — Distributed training fundamentals (DDP)** (`15-distributed-training/`)
+- [x] **15 — Distributed training fundamentals (DDP)** (`15-distributed-training/`) — has its own `.venv/`. Real torch.distributed (gloo), 4 local ranks. Measured: DDP ranks converge to exactly 0.0 L2 weight distance; no-sync control diverges to 0.3655.
   Gap: "distributed training at scale... PyTorch DDP, FSDP" — named at
   NVIDIA, Tesla, Perplexity, Scale AI explicitly.
   Honest scope: no real multi-GPU cluster available. Demonstrates the

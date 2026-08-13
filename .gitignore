@@ -21,5 +21,6 @@ idempotency_store.json
 14-cost-optimization/cost_ledger.sqlite
 14-cost-optimization/dashboard.html
 02-llm-eval-gate/logs/audit.jsonl
+15-distributed-training/checkpoints/
 *.log
 node_modules/
