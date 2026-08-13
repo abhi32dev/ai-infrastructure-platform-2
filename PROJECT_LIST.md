@@ -65,11 +65,7 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done
   Stack: Ollama, FastAPI wrapper, health checks (mirrors CONDOR's
   health-check-driven failover pattern)
 
-- [ ] **10 — Deep learning / object detection demo** (`10-deep-learning-demo/`)
-  Maps to: "Applied Deep Learning, Object Detection & Tracking (Coursework)",
-  IEEE publication lifecycle (research → design → train → evaluate → deploy)
-  Stack: PyTorch or TensorFlow, small pretrained detector fine-tuned on a
-  small dataset
+- [x] **10 — Deep learning / object detection demo** (`10-deep-learning-demo/`) — has its own `.venv/`. Fine-tuned Faster R-CNN on real PennFudan pedestrian data: mean IoU 0.875 on held-out set; found+fixed a real MPS NaN-loss bug (forced CPU); IoU tracker verified persistent IDs + false-positive isolation.
 
 ### Cross-cutting topics added on request (industry-standard AI platform concerns
 not explicitly named on the resume, but expected knowledge at Staff level)
