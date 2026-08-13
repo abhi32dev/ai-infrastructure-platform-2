@@ -82,7 +82,7 @@ not explicitly named on the resume, but expected knowledge at Staff level)
   the ad-hoc tool-calling in project 05.
   Stack: Python `mcp` SDK, stdio/HTTP transport, LangChain MCP adapter
 
-- [ ] **12 — Guardrails layer** (`12-guardrails/`)
+- [x] **12 — Guardrails layer** (`12-guardrails/`) — has its own `.venv/`. Red-team suite: 100% pass rate (8/8): 4/4 injections blocked, 2/2 PII cases correctly redacted, 2/2 benign allowed.
   What: input guardrails (prompt-injection pattern detection, PII
   detection/redaction before a query reaches a model), output guardrails
   (schema/type validation, PII leak scanning, toxicity/refusal checks), and
