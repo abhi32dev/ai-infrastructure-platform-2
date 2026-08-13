@@ -26,5 +26,8 @@ idempotency_store.json
 18-lora-finetuning/src/adapter_checkpoint/
 19-quantization-onnx/data/
 19-quantization-onnx/*.onnx
+20-terraform-iac/terraform/.terraform/
+20-terraform-iac/terraform/*.tfstate
+20-terraform-iac/terraform/*.tfstate.backup
 *.log
 node_modules/

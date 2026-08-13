@@ -79,7 +79,7 @@ Sources are cited in the session this analysis came from.
   Stack: export project 10's or 18's model to ONNX, apply
   dynamic/static quantization, measure size/latency deltas.
 
-- [ ] **20 — Terraform IaC module** (`20-terraform-iac/`)
+- [x] **20 — Terraform IaC module** (`20-terraform-iac/`) — has its own `.venv/` + LocalStack. Found+fixed a real licensing-gate bug (latest tag now needs paid auth token). Verified: all 3 resources (S3/DynamoDB/SQS+DLQ) real write/read round-trips succeeded.
   Gap: Terraform named in nearly every ML platform posting; resume's
   existing IaC story is AWS CDK only — a second IaC tool demonstrates
   breadth.

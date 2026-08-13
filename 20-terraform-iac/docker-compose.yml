@@ -1,0 +1,14 @@
+services:
+  localstack:
+    image: localstack/localstack:3.8.1
+    container_name: aegis-iac-localstack
+    ports:
+      - "4566:4566"
+    environment:
+      - SERVICES=s3,dynamodb,sqs
+      - DEBUG=0
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
+      interval: 3s
+      timeout: 5s
+      retries: 15
