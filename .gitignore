@@ -29,5 +29,6 @@ idempotency_store.json
 20-terraform-iac/terraform/.terraform/
 20-terraform-iac/terraform/*.tfstate
 20-terraform-iac/terraform/*.tfstate.backup
+21-feature-store/feature_repo/data/
 *.log
 node_modules/

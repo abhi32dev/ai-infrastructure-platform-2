@@ -86,7 +86,7 @@ Sources are cited in the session this analysis came from.
   Stack: Terraform against LocalStack (same free/local pattern as the
   resume's Moto/LocalStack CCPA-service testing).
 
-- [ ] **21 — Feature store** (`21-feature-store/`)
+- [x] **21 — Feature store (Feast)** (`21-feature-store/`) — has its own `.venv/`. Real Feast + SQLite online store. Measured: point-in-time queries correctly return historical (not latest) values; found+documented a real row-dropping behavior for pre-snapshot queries.
   Gap: named explicitly as a core storage-layer component of the "AI
   infra stack" alongside vector DBs and data lakes.
   Stack: Feast, backed by local Postgres/Redis (reusing project 06's
