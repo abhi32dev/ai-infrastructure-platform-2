@@ -41,7 +41,7 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done
   also mirrors CONDOR's "Checkpointed Self-Healing" / "Master-Worker Dispatch"
   Stack: LangGraph, SQLite checkpoint store, tool/function calling
 
-- [ ] **06 — Backpressure-isolated ingestion + adaptive dispatch** (`06-backpressure-dispatch/`)
+- [x] **06 — Backpressure-isolated ingestion + adaptive dispatch** (`06-backpressure-dispatch/`) — has its own `.venv/` + docker-compose Redis. Measured: 0.36ms avg enqueue latency under 500-job burst w/ zero consumer, worker scaling 8→2 with depth, DLQ+replay verified.
   Maps to: CONDOR's "Backpressure Isolation" (SQS), "Adaptive Workload
   Orchestration" (200x volume / 265,000x payload swings), "Master-Worker
   Dispatch", "Dead-letter queue" recovery — reframed around an
