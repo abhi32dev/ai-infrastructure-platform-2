@@ -28,6 +28,91 @@ results from a real run (not hypothetical numbers), the full test
 breakdown above, and a "what to say in an interview" section for each
 non-obvious design decision.
 
+## Phase 2: market-gap projects (15–24)
+
+Added 2026-08-13 after a real web-search pass (not guessed) across current
+Staff/Principal AI Infrastructure job postings (NVIDIA, Tesla, Perplexity,
+Scale AI, Together AI) and 2026 industry hiring-trend reports, to close the
+highest-frequency gaps between what's already built (01–14) and what these
+postings actually ask for. Ranked by how often each theme appeared.
+Sources are cited in the session this analysis came from.
+
+- [ ] **15 — Distributed training fundamentals (DDP)** (`15-distributed-training/`)
+  Gap: "distributed training at scale... PyTorch DDP, FSDP" — named at
+  NVIDIA, Tesla, Perplexity, Scale AI explicitly.
+  Honest scope: no real multi-GPU cluster available. Demonstrates the
+  actual DDP protocol (process groups, gradient all-reduce, rank sync)
+  via `torch.distributed` with the `gloo` CPU backend across multiple
+  local processes — the same protocol that runs unchanged on real GPUs
+  with the `nccl` backend, only the backend name and device placement
+  change at real scale.
+
+- [ ] **16 — Kubernetes for ML workloads** (`16-kubernetes-ml/`)
+  Gap: single most-repeated keyword across every posting searched
+  ("Kubernetes internals," "GPU scheduling," named at NVIDIA/Tesla/
+  Perplexity/Scale AI).
+  Stack: `kind` (Kubernetes-in-Docker, already have Docker), deploying
+  project 09's serving harness as a real Deployment + Service + HPA +
+  liveness/readiness probes wired to its existing `/health` endpoint.
+
+- [ ] **17 — High-performance LLM inference serving** (`17-inference-serving/`)
+  Gap: "2026 primary focus is on inference: latency-per-token, throughput,
+  p99 latency" — vLLM/TensorRT-LLM/SGLang/Triton named directly.
+  Feasibility to verify: vLLM targets NVIDIA CUDA primarily; Apple
+  Silicon support is limited/experimental. Will test directly and
+  document honestly — likely substitutes llama.cpp's server (real
+  continuous-batching/paged-KV-cache equivalent that runs natively on
+  Apple Silicon) if vLLM itself doesn't run, benchmarked against
+  project 09's Ollama baseline.
+
+- [ ] **18 — LoRA/QLoRA fine-tuning** (`18-lora-finetuning/`)
+  Gap: "the biggest shift in 2026... PEFT... QLoRA + instruction tuning
+  is the practical path" — dominant, explicitly named technique.
+  Feasibility to verify: QLoRA's 4-bit quantization (bitsandbytes) is
+  traditionally CUDA-only. Will test on MPS/CPU and document honestly —
+  likely full-precision LoRA via Hugging Face `peft` on a small causal
+  LM, with the QLoRA quantization gap stated explicitly rather than
+  faked.
+
+- [ ] **19 — Model quantization & ONNX export** (`19-quantization-onnx/`)
+  Gap: "model optimization" named alongside fine-tuning in postings.
+  Stack: export project 10's or 18's model to ONNX, apply
+  dynamic/static quantization, measure size/latency deltas.
+
+- [ ] **20 — Terraform IaC module** (`20-terraform-iac/`)
+  Gap: Terraform named in nearly every ML platform posting; resume's
+  existing IaC story is AWS CDK only — a second IaC tool demonstrates
+  breadth.
+  Stack: Terraform against LocalStack (same free/local pattern as the
+  resume's Moto/LocalStack CCPA-service testing).
+
+- [ ] **21 — Feature store** (`21-feature-store/`)
+  Gap: named explicitly as a core storage-layer component of the "AI
+  infra stack" alongside vector DBs and data lakes.
+  Stack: Feast, backed by local Postgres/Redis (reusing project 06's
+  Redis).
+
+- [ ] **22 — Named LLM eval tools (Ragas / DeepEval)** (`22-ragas-deepeval/`)
+  Gap: projects 02/03 built a from-scratch evaluation gate (strong
+  engineering signal) but don't demonstrate fluency with the specific
+  named tools interviewers ask about.
+  Stack: wraps project 01's RAG pipeline with both Ragas and DeepEval,
+  compared side by side.
+
+- [ ] **23 — TensorFlow / Keras project** (`23-tensorflow-keras/`)
+  Gap: the user's own question — confirmed real gap. ~33% of postings
+  still name TensorFlow; dominant for edge/enterprise/mobile deployment.
+  Stack: a Keras model (likely a lightweight image classifier or the
+  project-08-style recommender re-implemented in Keras) to show
+  cross-framework fluency, not just PyTorch.
+
+- [ ] **24 — GPU cost governance / FinOps dashboard** (`24-gpu-finops/`)
+  Gap: "tracking GPU utilization... strict cost controls" named as a
+  core 2026 responsibility, distinct from project 14's LLM-token cost
+  focus.
+  Stack: extends project 14's ledger/dashboard pattern to simulated
+  GPU-hour utilization and idle-cost tracking.
+
 ---
 
 ## Build order & status
