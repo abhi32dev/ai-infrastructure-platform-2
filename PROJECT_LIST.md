@@ -24,7 +24,7 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done
   model before it acts"
   Stack: Python, two Ollama models (generator + judge), FastAPI gate service
 
-- [ ] **03 — MLflow versioning + CI regression gate** (`03-mlops-versioning-ci/`)
+- [x] **03 — MLflow versioning + CI regression gate** (`03-mlops-versioning-ci/`) — has its own `.venv/`. Measured: v1 prompt 0.33 agreement vs v2 0.83 agreement, gate verified to block regressions.
   Maps to: "Automation Logic Version Tracking" (MLflow), "CI-Gated Automation
   Changes" (GitHub Actions blocking regressions)
   Stack: MLflow (local tracking server), GitHub Actions, pytest

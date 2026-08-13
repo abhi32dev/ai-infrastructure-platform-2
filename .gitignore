@@ -7,5 +7,7 @@ venv/
 .DS_Store
 chroma_db/
 mlruns/
+mlflow.db
+mlartifacts/
 *.log
 node_modules/

@@ -1,0 +1,55 @@
+name: AI Logic Regression Gate
+
+on:
+  pull_request:
+    paths:
+      - "03-mlops-versioning-ci/prompts/**"
+      - "03-mlops-versioning-ci/src/**"
+  push:
+    branches: [main]
+    paths:
+      - "03-mlops-versioning-ci/prompts/**"
+      - "03-mlops-versioning-ci/src/**"
+
+jobs:
+  regression-gate:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: 03-mlops-versioning-ci
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Ollama
+        run: curl -fsSL https://ollama.com/install.sh | sh
+
+      - name: Start Ollama and pull models
+        run: |
+          ollama serve &
+          sleep 5
+          ollama pull qwen2.5:1.5b
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m venv .venv
+          source .venv/bin/activate
+          pip install -r requirements.txt
+
+      - name: Run unit tests
+        run: |
+          source .venv/bin/activate
+          pytest -q -k "not live"
+
+      - name: Run regression gate against committed baseline
+        run: |
+          source .venv/bin/activate
+          cd src
+          python regression_gate.py
+        # Non-zero exit here fails the workflow and blocks the PR from
+        # merging if branch protection requires this check — the same
+        # CODEOWNERS + required-check pattern described in the CONDOR
+        # release-governance bullet.

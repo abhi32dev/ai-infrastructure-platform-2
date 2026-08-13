@@ -1,0 +1,4 @@
+mlflow
+langchain-ollama
+langchain-core
+pytest
