@@ -12,7 +12,7 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done
 
 ## Build order & status
 
-- [~] **01 — RAG-from-scratch pipeline** (`01-rag-pipeline/`)
+- [x] **01 — RAG-from-scratch pipeline** (`01-rag-pipeline/`)
   Maps to: "Applied RAG & Vector Retrieval (Self-Directed)", "7 retrieval
   stages — ingestion, chunking, embedding, vector indexing, retrieval,
   context assembly, LLM response generation"
