@@ -74,7 +74,7 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done
 ### Cross-cutting topics added on request (industry-standard AI platform concerns
 not explicitly named on the resume, but expected knowledge at Staff level)
 
-- [ ] **11 — MCP (Model Context Protocol) agent-to-agent demo** (`11-mcp-agent-protocol/`)
+- [x] **11 — MCP (Model Context Protocol) agent-to-agent demo** (`11-mcp-agent-protocol/`) — has its own `.venv/`. Verified: tool discovery over stdio, coordinator hides specialist entirely, full delegated remediation trace with correct state persistence.
   What: a minimal MCP server exposing tools + an MCP client agent that
   discovers and calls them, plus a second agent-to-agent handoff (one agent
   delegates a subtask to another over MCP) — the emerging standard protocol

@@ -1,0 +1,7 @@
+mcp
+langchain-mcp-adapters
+langchain-ollama
+langchain-core
+langgraph
+pytest
+pytest-asyncio

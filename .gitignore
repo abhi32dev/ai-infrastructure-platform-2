@@ -13,5 +13,10 @@ mlartifacts/
 08-recommender-system/data/ml-100k.zip
 checkpoints.sqlite
 idempotency_store.json
+10-deep-learning-demo/data/PennFudanPed/
+10-deep-learning-demo/data/PennFudanPed.zip
+10-deep-learning-demo/outputs/*.pt
+10-deep-learning-demo/outputs/*.png
+!10-deep-learning-demo/outputs/.gitkeep
 *.log
 node_modules/
