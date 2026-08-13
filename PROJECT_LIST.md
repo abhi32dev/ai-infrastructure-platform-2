@@ -74,7 +74,7 @@ Sources are cited in the session this analysis came from.
   LM, with the QLoRA quantization gap stated explicitly rather than
   faked.
 
-- [ ] **19 — Model quantization & ONNX export** (`19-quantization-onnx/`)
+- [x] **19 — Model quantization & ONNX export** (`19-quantization-onnx/`) — has its own `.venv/`. Real MNIST CNN. Measured: 72.3% size reduction, no accuracy regression, but INT8 was 3-4x SLOWER than fp32 (real, reproduced, explained finding).
   Gap: "model optimization" named alongside fine-tuning in postings.
   Stack: export project 10's or 18's model to ONNX, apply
   dynamic/static quantization, measure size/latency deltas.

@@ -24,5 +24,7 @@ idempotency_store.json
 15-distributed-training/checkpoints/
 17-inference-serving/models/*.gguf
 18-lora-finetuning/src/adapter_checkpoint/
+19-quantization-onnx/data/
+19-quantization-onnx/*.onnx
 *.log
 node_modules/
