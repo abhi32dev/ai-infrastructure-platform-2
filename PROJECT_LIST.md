@@ -65,7 +65,7 @@ Sources are cited in the session this analysis came from.
   Apple Silicon) if vLLM itself doesn't run, benchmarked against
   project 09's Ollama baseline.
 
-- [ ] **18 — LoRA/QLoRA fine-tuning** (`18-lora-finetuning/`)
+- [x] **18 — QLoRA fine-tuning** (`18-lora-finetuning/`) — has its own `.venv/`. Verified real 4-bit quantization works on this hardware (corrected the "CUDA-only" assumption from research). Measured: 0.242% trainable params, 591KB adapter vs 320MB+ base model, loss 5.18→4.06 across 8 epochs.
   Gap: "the biggest shift in 2026... PEFT... QLoRA + instruction tuning
   is the practical path" — dominant, explicitly named technique.
   Feasibility to verify: QLoRA's 4-bit quantization (bitsandbytes) is

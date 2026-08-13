@@ -23,5 +23,6 @@ idempotency_store.json
 02-llm-eval-gate/logs/audit.jsonl
 15-distributed-training/checkpoints/
 17-inference-serving/models/*.gguf
+18-lora-finetuning/src/adapter_checkpoint/
 *.log
 node_modules/
