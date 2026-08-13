@@ -35,7 +35,7 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done
   smaller model
   Stack: Python, Ollama (small + large model), token-cost instrumentation
 
-- [ ] **05 — Agent runtime with checkpointing & idempotency** (`05-agent-runtime/`)
+- [x] **05 — Agent runtime with checkpointing & idempotency** (`05-agent-runtime/`) — has its own `.venv/`. LangGraph + SQLite checkpointer; verified checkpoint-survives-restart, idempotent no-rerun, bounded retry, human-in-the-loop interrupt/resume, all with passing tests.
   Maps to: "Self-Directed Agent Runtime" — durable state, checkpoints,
   bounded retries, idempotency, failure isolation, human-in-the-loop;
   also mirrors CONDOR's "Checkpointed Self-Healing" / "Master-Worker Dispatch"
@@ -71,6 +71,45 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done
   Stack: PyTorch or TensorFlow, small pretrained detector fine-tuned on a
   small dataset
 
+### Cross-cutting topics added on request (industry-standard AI platform concerns
+not explicitly named on the resume, but expected knowledge at Staff level)
+
+- [ ] **11 — MCP (Model Context Protocol) agent-to-agent demo** (`11-mcp-agent-protocol/`)
+  What: a minimal MCP server exposing tools + an MCP client agent that
+  discovers and calls them, plus a second agent-to-agent handoff (one agent
+  delegates a subtask to another over MCP) — the emerging standard protocol
+  for how agents expose capabilities to other agents/models, distinct from
+  the ad-hoc tool-calling in project 05.
+  Stack: Python `mcp` SDK, stdio/HTTP transport, LangChain MCP adapter
+
+- [ ] **12 — Guardrails layer** (`12-guardrails/`)
+  What: input guardrails (prompt-injection pattern detection, PII
+  detection/redaction before a query reaches a model), output guardrails
+  (schema/type validation, PII leak scanning, toxicity/refusal checks), and
+  rate limiting — applied in front of project 01/02's pipelines as a
+  reusable middleware layer, with a red-team test suite of adversarial
+  inputs that must be caught.
+  Stack: Python, regex/presidio-style PII patterns, pydantic schema
+  validation, a small adversarial-prompt eval set
+
+- [ ] **13 — Observability for AI systems** (`13-observability/`)
+  What: OpenTelemetry tracing across a full RAG/agent request (retrieval
+  span, generation span, tool-call spans), Prometheus metrics (request
+  latency, token counts, error rate, judge agreement rate pulled from
+  project 02/03), and a Grafana dashboard definition — the AI-specific
+  extension of the resume's existing Prometheus/Grafana/OpenTelemetry line.
+  Stack: OpenTelemetry SDK, Prometheus, Grafana (Docker Compose), applied
+  to project 01's RAG pipeline as the traced system
+
+- [ ] **14 — Cost optimization deep-dive: caching & dashboard** (`14-cost-optimization/`)
+  What: extends project 04 with a semantic response cache (skip the LLM
+  call entirely for a near-duplicate query), a request-level cost ledger,
+  and a small dashboard visualizing spend by model/query-type over time —
+  the operational layer on top of project 04's one-shot routing
+  measurement.
+  Stack: Python, an embedding-similarity cache (reuses project 01's Chroma
+  pattern), SQLite cost ledger, a simple HTML/artifact dashboard
+
 ---
 
 ## Resume-claim → project cross-reference
@@ -92,6 +131,11 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done
 | Ollama local prototyping | 01, 04, 09 |
 | Deep learning / object detection (TensorFlow) | 10 |
 | IEEE ML lifecycle (research→deploy) | 10 |
+| MCP / agent-to-agent protocol | 11 |
+| Guardrails (prompt injection, PII, output validation) | 12 |
+| Evaluation sets & regression testing | 02, 03, 12 |
+| Observability (tracing/metrics/dashboards) for AI systems | 13 |
+| Cost optimization beyond one-shot routing (caching, ledger) | 04, 14 |
 
 ---
 
