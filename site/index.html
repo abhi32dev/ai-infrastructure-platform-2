@@ -1,0 +1,555 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI Infrastructure Platform — Console</title>
+<meta name="description" content="14 hands-on AI/ML infrastructure projects with measured, tested, real results.">
+<style>
+  :root {
+    --bg: #F2F4F6;
+    --bg-elevated: #FFFFFF;
+    --bg-inset: #E8EBEE;
+    --border: #D8DEE4;
+    --border-soft: #E4E8EB;
+    --text-primary: #12181F;
+    --text-secondary: #55626F;
+    --text-tertiary: #8993A0;
+    --accent: #B5701F;
+    --accent-bright: #D4881F;
+    --accent-soft: #F0DEC0;
+    --status-good: #1F8F63;
+    --status-good-soft: #D9F0E5;
+    --shadow: 0 1px 2px rgba(18,24,31,0.04), 0 8px 24px rgba(18,24,31,0.06);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0B0F14;
+      --bg-elevated: #121820;
+      --bg-inset: #0D131A;
+      --border: #232B35;
+      --border-soft: #1B222B;
+      --text-primary: #E9EDF0;
+      --text-secondary: #8C99A6;
+      --text-tertiary: #5C6773;
+      --accent: #E8A33D;
+      --accent-bright: #F2B658;
+      --accent-soft: #3A2C15;
+      --status-good: #4FBF8B;
+      --status-good-soft: #16281F;
+      --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 12px 32px rgba(0,0,0,0.4);
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --bg: #0B0F14;
+    --bg-elevated: #121820;
+    --bg-inset: #0D131A;
+    --border: #232B35;
+    --border-soft: #1B222B;
+    --text-primary: #E9EDF0;
+    --text-secondary: #8C99A6;
+    --text-tertiary: #5C6773;
+    --accent: #E8A33D;
+    --accent-bright: #F2B658;
+    --accent-soft: #3A2C15;
+    --status-good: #4FBF8B;
+    --status-good-soft: #16281F;
+    --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 12px 32px rgba(0,0,0,0.4);
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text-primary);
+    font-family: -apple-system, "Segoe UI", system-ui, Roboto, sans-serif;
+    min-height: 100vh;
+    padding: 0 0 80px;
+  }
+
+  .mono {
+    font-family: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", Menlo, Consolas, monospace;
+  }
+
+  .wrap {
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 0 28px;
+  }
+
+  /* ---- Header / status bar ---- */
+
+  .statusbar {
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-elevated);
+  }
+
+  .statusbar-inner {
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 12px 28px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 12.5px;
+    letter-spacing: 0.02em;
+    color: var(--text-secondary);
+    flex-wrap: wrap;
+  }
+
+  .dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--status-good);
+    flex: none;
+    box-shadow: 0 0 0 3px var(--status-good-soft);
+    animation: pulse 2.4s ease-in-out infinite;
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.55; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .dot { animation: none; }
+  }
+
+  .statusbar b { color: var(--text-primary); font-weight: 600; }
+  .statusbar .sep { color: var(--border); }
+
+  /* ---- Hero ---- */
+
+  .hero {
+    padding: 64px 0 52px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .eyebrow {
+    font-size: 12px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--accent);
+    font-weight: 600;
+    margin-bottom: 18px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .eyebrow::after {
+    content: "";
+    display: inline-block;
+    width: 8px;
+    height: 14px;
+    background: var(--accent);
+    animation: blink 1.1s step-end infinite;
+  }
+
+  @keyframes blink {
+    0%, 49% { opacity: 1; }
+    50%, 100% { opacity: 0; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .eyebrow::after { animation: none; }
+  }
+
+  h1 {
+    font-family: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", Menlo, Consolas, monospace;
+    font-size: clamp(30px, 4.4vw, 50px);
+    line-height: 1.08;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    margin: 0 0 20px;
+    text-wrap: balance;
+    max-width: 15ch;
+  }
+
+  h1 .accent-word { color: var(--accent); }
+
+  .hero-sub {
+    font-size: 16.5px;
+    line-height: 1.65;
+    color: var(--text-secondary);
+    max-width: 62ch;
+    margin: 0 0 30px;
+  }
+
+  .hero-sub b { color: var(--text-primary); font-weight: 600; }
+
+  .hero-stats {
+    display: flex;
+    gap: 0;
+    flex-wrap: wrap;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+    background: var(--bg-elevated);
+    width: fit-content;
+  }
+
+  .hero-stat {
+    padding: 14px 24px;
+    border-right: 1px solid var(--border);
+  }
+
+  .hero-stat:last-child { border-right: none; }
+
+  .hero-stat .num {
+    font-family: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", Menlo, Consolas, monospace;
+    font-size: 22px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    color: var(--text-primary);
+    line-height: 1.1;
+  }
+
+  .hero-stat .label {
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-tertiary);
+    margin-top: 4px;
+  }
+
+  /* ---- Grid ---- */
+
+  .section-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin: 52px 0 22px;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .section-head h2 {
+    font-family: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", Menlo, Consolas, monospace;
+    font-size: 13px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    font-weight: 700;
+    color: var(--text-tertiary);
+    margin: 0;
+  }
+
+  .section-head .hint {
+    font-size: 12.5px;
+    color: var(--text-tertiary);
+  }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 14px;
+  }
+
+  .card {
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 18px 18px 16px;
+    text-decoration: none;
+    color: inherit;
+    transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+  }
+
+  .card:hover, .card:focus-visible {
+    transform: translateY(-2px);
+    border-color: var(--accent);
+    box-shadow: var(--shadow);
+  }
+
+  .card:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  .card-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+  }
+
+  .card-id {
+    font-family: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", Menlo, Consolas, monospace;
+    font-size: 11.5px;
+    letter-spacing: 0.05em;
+    color: var(--text-tertiary);
+    font-weight: 600;
+  }
+
+  .card-status {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 10.5px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--status-good);
+    font-weight: 600;
+  }
+
+  .card-status .dot {
+    width: 6px;
+    height: 6px;
+    box-shadow: 0 0 0 2px var(--status-good-soft);
+  }
+
+  .card h3 {
+    font-size: 15.5px;
+    font-weight: 650;
+    margin: 0 0 8px;
+    line-height: 1.3;
+    color: var(--text-primary);
+  }
+
+  .card p {
+    font-size: 13px;
+    line-height: 1.55;
+    color: var(--text-secondary);
+    margin: 0 0 16px;
+    flex: 1;
+  }
+
+  .card-metric {
+    background: var(--bg-inset);
+    border: 1px solid var(--border-soft);
+    border-radius: 7px;
+    padding: 10px 12px;
+    margin-bottom: 14px;
+  }
+
+  .card-metric .val {
+    font-family: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", Menlo, Consolas, monospace;
+    font-size: 17px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    color: var(--accent);
+    line-height: 1.2;
+  }
+
+  .card-metric .desc {
+    font-size: 11px;
+    color: var(--text-tertiary);
+    margin-top: 2px;
+  }
+
+  .card-open {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-family: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", Menlo, Consolas, monospace;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    padding-top: 12px;
+    border-top: 1px solid var(--border-soft);
+  }
+
+  .card:hover .card-open, .card:focus-visible .card-open {
+    color: var(--accent);
+  }
+
+  .card-open .arrow {
+    transition: transform 0.15s ease;
+  }
+
+  .card:hover .card-open .arrow, .card:focus-visible .card-open .arrow {
+    transform: translate(2px, -2px);
+  }
+
+  /* ---- Footer ---- */
+
+  .footer {
+    margin-top: 60px;
+    padding-top: 32px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    flex-wrap: wrap;
+    gap: 24px;
+  }
+
+  .footer-block h4 {
+    font-size: 12px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-tertiary);
+    margin: 0 0 10px;
+    font-weight: 700;
+  }
+
+  .footer-code {
+    background: var(--bg-inset);
+    border: 1px solid var(--border-soft);
+    border-radius: 8px;
+    padding: 14px 16px;
+    font-family: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", Menlo, Consolas, monospace;
+    font-size: 12.5px;
+    color: var(--text-secondary);
+    line-height: 1.7;
+    white-space: pre;
+    overflow-x: auto;
+    max-width: 100%;
+  }
+
+  .footer-code .cmt { color: var(--text-tertiary); }
+
+  .footer-link {
+    font-family: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", Menlo, Consolas, monospace;
+    font-size: 13px;
+    color: var(--accent);
+    text-decoration: none;
+    font-weight: 600;
+  }
+
+  .footer-link:hover { text-decoration: underline; }
+
+  @media (max-width: 640px) {
+    .hero { padding: 44px 0 36px; }
+    .hero-stat { padding: 12px 16px; }
+  }
+</style>
+</head>
+<body>
+  <div class="statusbar">
+    <div class="statusbar-inner">
+      <span class="dot"></span>
+      <span><b>PORTFOLIO STATUS</b> · 14/14 SERVICES ONLINE</span>
+      <span class="sep">/</span>
+      <span>131 TESTS PASSING</span>
+      <span class="sep">/</span>
+      <span>0 CLOUD $ SPENT</span>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <section class="hero">
+      <div class="eyebrow">abhi32dev / ai-infrastructure-platform-2</div>
+      <h1>Fourteen systems.<br>Zero <span class="accent-word">slideware</span>.</h1>
+      <p class="hero-sub">
+        A hands-on AI/ML infrastructure portfolio — RAG pipelines, multi-model
+        evaluation gates, MLOps regression gating, agent runtimes, distributed
+        backpressure, statistical experimentation, and more. Every card below
+        links to a real, tested, runnable project with <b>measured results
+        from an actual run</b>, not a projected number.
+      </p>
+      <div class="hero-stats">
+        <div class="hero-stat">
+          <div class="num">14 / 14</div>
+          <div class="label">Projects shipped</div>
+        </div>
+        <div class="hero-stat">
+          <div class="num">131</div>
+          <div class="label">Tests, all passing</div>
+        </div>
+        <div class="hero-stat">
+          <div class="num">100%</div>
+          <div class="label">Runs locally</div>
+        </div>
+      </div>
+    </section>
+
+    <div class="section-head">
+      <h2>Service Registry</h2>
+      <span class="hint">click any panel to open its source on GitHub →</span>
+    </div>
+
+    <div class="grid" id="cardgrid"></div>
+
+    <div class="footer">
+      <div class="footer-block">
+        <h4>Quick start</h4>
+        <div class="footer-code"><span class="cmt"># any project folder, e.g. 01-rag-pipeline</span>
+cd 01-rag-pipeline
+python3 -m venv .venv &amp;&amp; source .venv/bin/activate
+pip install -r requirements.txt
+pytest -q</div>
+      </div>
+      <div class="footer-block">
+        <h4>Repository</h4>
+        <a class="footer-link" href="https://github.com/abhi32dev/ai-infrastructure-platform-2" target="_blank" rel="noopener">github.com/abhi32dev/ai-infrastructure-platform-2 ↗</a>
+      </div>
+    </div>
+  </div>
+
+<script>
+  const REPO = "https://github.com/abhi32dev/ai-infrastructure-platform-2/tree/main/";
+
+  const projects = [
+    { id: "01", slug: "01-rag-pipeline", name: "RAG-from-Scratch Pipeline",
+      desc: "7-stage retrieval pipeline — ingest, chunk, embed, index, retrieve, assemble, generate — with grounded refusal on out-of-corpus questions.",
+      metricVal: "4 / 4", metricDesc: "smoke tests, grounded refusal verified" },
+    { id: "02", slug: "02-llm-eval-gate", name: "Multi-Model Evaluation Gate",
+      desc: "An independent second model reviews every automation decision before it's allowed to execute — an AND-gate, not a vote.",
+      metricVal: "0.33 → 0.83", metricDesc: "judge agreement rate, v1 → v2 prompt fix" },
+    { id: "03", slug: "03-mlops-versioning-ci", name: "MLflow Versioning + CI Gate",
+      desc: "Prompt and automation-logic versions tracked in MLflow; a CI regression gate blocks a measured quality drop from merging.",
+      metricVal: "0.83", metricDesc: "committed baseline agreement rate" },
+    { id: "04", slug: "04-cost-aware-router", name: "Cost-Aware Model Router",
+      desc: "Routes simple queries to a small model, complex ones to a larger model; separately sweeps chunk size / k against retrieval cost.",
+      metricVal: "39.7%", metricDesc: "cost saved vs. always-large routing" },
+    { id: "05", slug: "05-agent-runtime", name: "Agent Runtime (LangGraph)",
+      desc: "Checkpointed, idempotent, bounded-retry agent workflow with a human-in-the-loop approval gate for risky actions.",
+      metricVal: "8 / 8", metricDesc: "reliability properties proven, incl. restart-survival" },
+    { id: "06", slug: "06-backpressure-dispatch", name: "Backpressure + Adaptive Dispatch",
+      desc: "Real Redis-backed queue: ingestion never blocks on a stalled consumer; a master-worker dispatcher scales to observed depth.",
+      metricVal: "0.36 ms", metricDesc: "avg enqueue latency, 500-job burst, 0 consumers" },
+    { id: "07", slug: "07-ab-testing-harness", name: "A/B Testing & p-Value Harness",
+      desc: "Two-proportion z-test and Welch's t-test, proven on both a seeded large-scale lift and a small, noisy, real sample.",
+      metricVal: "p = 0.499", metricDesc: "correctly called NOT significant at n=8" },
+    { id: "08", slug: "08-recommender-system", name: "Matrix-Factorization Recommender",
+      desc: "SGD matrix factorization built from scratch, evaluated on real MovieLens 100K against a popularity baseline.",
+      metricVal: "+30.19%", metricDesc: "precision@10 over baseline (p = 0.0017)" },
+    { id: "09", slug: "09-local-model-serving", name: "Local Model Serving Harness",
+      desc: "Ollama behind FastAPI with a circuit breaker: open / half-open / closed, verified against a real downstream failure.",
+      metricVal: "0.001 s", metricDesc: "fast-fail latency vs. a 30s timeout" },
+    { id: "10", slug: "10-deep-learning-demo", name: "Detection & Tracking",
+      desc: "Fine-tuned Faster R-CNN on real pedestrian images, plus an IoU multi-object tracker with false-positive isolation.",
+      metricVal: "0.875", metricDesc: "mean IoU, held-out set" },
+    { id: "11", slug: "11-mcp-agent-protocol", name: "MCP Agent-to-Agent Protocol",
+      desc: "Real MCP servers over stdio — a coordinator agent delegates sub-tasks to a specialist agent, fully encapsulated.",
+      metricVal: "8 / 8", metricDesc: "protocol + delegation tests passing" },
+    { id: "12", slug: "12-guardrails", name: "Guardrails Layer",
+      desc: "Prompt-injection detection, PII redaction, output-leak scanning, and rate limiting in front of a real model call.",
+      metricVal: "100%", metricDesc: "red-team suite pass rate (8/8 cases)" },
+    { id: "13", slug: "13-observability", name: "Observability Stack",
+      desc: "OpenTelemetry tracing per pipeline stage, Prometheus metrics, and a provisioned Grafana dashboard via docker-compose.",
+      metricVal: "3 / 3", metricDesc: "queries scraped end-to-end, verified live" },
+    { id: "14", slug: "14-cost-optimization", name: "Semantic Cache & Cost Dashboard",
+      desc: "Embedding-similarity response cache with a real threshold-calibration story, plus an HTML spend dashboard.",
+      metricVal: "27%", metricDesc: "cost saved, calibrated similarity cache" },
+  ];
+
+  const grid = document.getElementById("cardgrid");
+  grid.innerHTML = projects.map(p => `
+    <a class="card" href="${REPO}${p.slug}" target="_blank" rel="noopener" aria-label="Open ${p.name} on GitHub">
+      <div class="card-top">
+        <span class="card-id mono">SVC-${p.id}</span>
+        <span class="card-status"><span class="dot"></span>online</span>
+      </div>
+      <h3>${p.name}</h3>
+      <p>${p.desc}</p>
+      <div class="card-metric">
+        <div class="val">${p.metricVal}</div>
+        <div class="desc">${p.metricDesc}</div>
+      </div>
+      <div class="card-open">
+        <span>view source</span>
+        <span class="arrow">↗</span>
+      </div>
+    </a>
+  `).join("");
+</script>
+</body>
+</html>
