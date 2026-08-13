@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
+*.sqlite3
+.DS_Store
+chroma_db/
+mlruns/
+*.log
+node_modules/
