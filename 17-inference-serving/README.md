@@ -22,6 +22,35 @@ of this same core idea — the concept under test here (continuous batching
 improves throughput under concurrent load) is the same; the
 memory-management sophistication is what a real GPU deployment adds.
 
+## Update (2026-08-14): the vLLM finding above is now stale — re-verified, not assumed
+
+Re-tested `pip install vllm` on this same machine and it now succeeds
+cleanly (vLLM 0.19.1), building a genuine CPU-mode wheel with no CUDA
+required — a real change in vLLM's own ecosystem since this project was
+first written, not a mistake in the original finding. Proven with a real
+run, not just a successful install: `vllm_cpu_benchmark.py` loads
+`Qwen/Qwen2.5-0.5B-Instruct` — the same model this project already
+benchmarks with llama.cpp — through vLLM's actual CPU inference engine
+and measures real serial-vs-batched throughput via vLLM's own
+continuous-batching `LLM.generate()` API:
+
+```
+Serial:  256 tokens in 5.23s = 48.9 tok/s
+Batched: 256 tokens in 2.21s = 115.8 tok/s
+Batching speedup: 2.37x
+```
+
+That 2.37x is strikingly close to llama.cpp's independently-measured
+2.09–2.27x below — two different engines, two different measurement
+harnesses, converging on roughly the same continuous-batching speedup
+magnitude, which is a meaningful cross-validation of the underlying
+result, not just a coincidence to note in passing. See "Setup: vLLM CPU
+benchmark" below to reproduce. The original honest-scope reasoning below
+is kept as-written, unedited, because the substitution decision was
+correct given what was true at the time — this update is the same
+"measure, don't assume" discipline applied a second time, now that the
+landscape changed.
+
 ## Maps to the market-gap research
 - "2026 primary focus is on inference: latency-per-token, throughput
   under concurrent load... p99 latency" — named directly in ML platform
@@ -46,6 +75,23 @@ source .venv/bin/activate
 cd src
 python run_demo.py
 ```
+
+## Setup: vLLM CPU benchmark (2026 update, optional)
+
+Separate from the llama.cpp benchmark above — kept in its own venv
+because vLLM's dependency stack is heavy (torch, transformers) and
+unrelated to the core llama-server benchmark.
+
+```bash
+cd 17-inference-serving
+python3 -m venv .venv-vllm && source .venv-vllm/bin/activate
+pip install -r requirements-vllm.txt
+cd src
+python vllm_cpu_benchmark.py
+```
+
+Downloads `Qwen/Qwen2.5-0.5B-Instruct` from Hugging Face on first run
+(~1GB) and runs entirely on CPU — no GPU, no CUDA, no Docker.
 
 ## Measured results (clean run)
 
@@ -123,6 +169,26 @@ serial result. Stable across repeated runs after the restructuring above.
   measurement approach (isolate batching as the only variable, use
   enough concurrent load to make the effect measurable, run clean
   isolated trials) transfers directly; only the serving engine changes.
+- **Why re-check a finding you already wrote down as settled?**
+  Because "settled" facts about fast-moving tooling have a shelf life —
+  vLLM's Apple Silicon CPU support materially improved after this
+  project's original vLLM-vs-llama.cpp decision was made and documented.
+  Re-running the exact same `pip install vllm` command months later and
+  getting a different, better result is itself a finding worth recording,
+  not a sign the original work was wrong — the discipline is re-verifying
+  periodically, not trusting a written-down conclusion indefinitely.
+- **Did you also check Triton Inference Server and TensorRT-LLM the same
+  way?** Yes — both remain genuinely infeasible here, for different
+  reasons than vLLM's original blocker. TensorRT-LLM has no CPU or ARM
+  path at all; it's CUDA-only by design, full stop. Triton *does* publish
+  arm64 images, but the only ones that actually exist are built for
+  NVIDIA Jetson's integrated-GPU stack (verified directly: the one
+  community arm64 image found, `andreasschliebitz/tritonserver:24.08-igpu-s3`,
+  targets Jetson iGPU hardware specifically) — there's no generic
+  CPU-only arm64 Triton image to `docker pull` and run on a Mac. That's
+  a meaningfully different situation from vLLM's, which is worth being
+  able to explain precisely rather than lumping "couldn't run any of
+  the CUDA-oriented tools" into one vague statement.
 - **Known limitation to volunteer:** this benchmarks a 0.5B-parameter
   model on CPU — real production inference-serving decisions are made at
   7B–70B+ parameter scale on GPU, where memory bandwidth and KV-cache

@@ -1,0 +1,5 @@
+# Optional, separate from requirements.txt: only needed to run
+# vllm_cpu_benchmark.py. Kept separate because vLLM pulls in a heavy
+# dependency stack (torch, transformers, etc.) that the core llama.cpp
+# benchmark doesn't need.
+vllm
