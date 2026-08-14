@@ -64,6 +64,61 @@
       <span class="path">NOTREADY → [cooldown passes, no traffic] → HALFOPENGAP → STALEHEALTHY (documented, not silently patched)</span>
     </div>
 
+    <div class="section-head"><h2>What this project actually does &amp; architecture trade-offs</h2></div>
+    <div class="arch-grid">
+      <div class="arch-block does">
+        <h4>What it does</h4>
+        <ul>
+        <li>Found and fixed a real Kubernetes readiness-probe bug: the health endpoint originally always returned HTTP 200 (with a JSON body describing health), but Kubernetes' <code>httpGet</code> probe only reads the status code, so an unhealthy pod never left rotation until the fix (return 503 when unhealthy) was applied.</li>
+        <li>Tunes readiness and liveness probe thresholds asymmetrically — readiness fails fast (<code>failureThreshold: 2</code>, controls traffic routing) while liveness is more tolerant (<code>failureThreshold: 5</code>, controls pod restarts) — deliberately, since a downstream outage shouldn't trigger a pod restart.</li>
+        <li>Found a second, subtler bug during the same live test: once the circuit breaker auto-transitions to HALF_OPEN after cooldown, <code>/health</code> reports healthy without actively re-pinging the real dependency — so with no real traffic, a pod can look Ready while its downstream is still genuinely down.</li>
+        </ul>
+      </div>
+      <div class="arch-block limits">
+        <h4>Known limitations</h4>
+        <ul>
+        <li>The HALF_OPEN gap is documented, not fixed — the project is explicit that this is a known, real limitation left as-is rather than silently patched, since a proper fix (active health re-probing independent of user traffic) adds real complexity this demo's scope didn't require.</li>
+        <li>Single-replica testing — the live bug-finding tests were run against a single pod, not validated against Kubernetes' actual multi-replica rolling update or Service endpoint-list update propagation timing under real load.</li>
+        <li>No resource limit/request tuning or HPA (Horizontal Pod Autoscaler) configuration validated against real load — the manifest defines requests/limits but they aren't load-tested against actual memory/CPU pressure.</li>
+        </ul>
+      </div>
+      <div class="arch-block tradeoffs">
+        <h4>Architectural trade-offs</h4>
+        <ul>
+        <li>Asymmetric probe thresholds (fast readiness, tolerant liveness) over identical thresholds for both — correctly models that 'stop routing traffic here' and 'kill and restart this pod' are different-severity decisions that shouldn't share a trigger point.</li>
+        <li>Leaving the HALF_OPEN gap documented rather than fixed — an honest trade-off given the project's scope; fixing it properly would require the health endpoint to actively probe the real dependency independent of traffic, adding a background polling loop this demo's architecture doesn't otherwise need.</li>
+        <li>HTTP status code as the sole probe signal (matching Kubernetes' own httpGet probe design) over a more expressive health-check protocol — this is really a design constraint enforced by Kubernetes itself, not a choice, and the actual bug fixed here is aligning application behavior to that constraint correctly.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="section-head"><h2>Principal / Staff engineer interview questions</h2></div>
+    <div class="qa-card">
+      <span class="qa-level">Staff</span>
+      <h4>Walk through exactly why 'always return 200' broke Kubernetes routing even though the JSON body correctly said `healthy: false`. What does that reveal about how to think about API contracts?</h4>
+      <p>Kubernetes' <code>httpGet</code> probe type has one, and only one, success signal: an HTTP status code in the 200-399 range. It does not parse response bodies at all — that's a documented, deliberate simplicity in how the probe type works, not an oversight. So an endpoint that always returns 200 is, from Kubernetes' point of view, always healthy, regardless of what the body says — the JSON was correct information that simply wasn't going where it needed to go to have any effect. The lesson: an API's actual contract is defined by what its consumer actually reads, not by what the producer believes it's communicating — 'correct data in the wrong channel' is functionally equivalent to no data at all, which is exactly the gap this bug exposed and the 503-on-unhealthy fix closed.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Principal</span>
+      <h4>You deliberately made liveness MORE tolerant than readiness. Defend that design decision to someone who thinks 'more tolerant liveness' sounds like it's hiding failures longer.</h4>
+      <p>Readiness and liveness answer fundamentally different questions with fundamentally different costs of being wrong: readiness asks 'should traffic go here right now', and being too tolerant there means real users hit a broken pod — the cost of over-tolerance is direct user impact, so it should react fast. Liveness asks 'is this process itself broken beyond repair, kill and restart it', and being too aggressive there means restarting a perfectly healthy pod just because a downstream dependency (something a restart can't fix anyway) is temporarily degraded — that's wasted disruption with zero benefit, since restarting the pod doesn't restart the dependency it's waiting on. Tolerant liveness isn't 'hiding failures longer', it's correctly recognizing that a downstream outage is not a liveness problem, and using readiness (which does react fast) to handle exactly that case instead.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Staff</span>
+      <h4>The HALF_OPEN gap is left documented, not fixed. If a staff engineer reviewing this told you to fix it before merge, what's the actual fix, and what does it cost?</h4>
+      <p>The fix: make <code>/health</code> actively probe the real dependency (a lightweight real call to Ollama, not just reading the circuit breaker's cached state) whenever the breaker is in HALF_OPEN specifically — CLOSED and OPEN states can trust cached state (CLOSED means recent calls succeeded; OPEN means recent calls failed and cooldown hasn't elapsed), but HALF_OPEN's whole premise is 'we don't know yet, need one real probe' and currently nothing forces that probe to happen if there's no organic user traffic. The cost: the health endpoint goes from a cheap, always-fast state read to occasionally making a real, potentially-slow call to the dependency — which changes the health endpoint's own latency/failure profile, and needs its own timeout so a hung dependency doesn't hang the health check itself, ironically risking the exact readiness-probe-timeout problem this project already had to reason carefully about.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Principal</span>
+      <h4>How would you actually validate, at scale, that your readiness probe design correctly removes unhealthy pods from rotation before this ships — beyond the single-pod live test in this project?</h4>
+      <p>I'd run a chaos-style validation in a real multi-replica staging deployment: deliberately kill the downstream dependency for one specific pod (e.g. via a network policy or sidecar fault injection targeting just that pod), and directly measure two things against the Service's actual endpoint list — the time from dependency failure to that pod's removal from the Endpoints/EndpointSlice, and the request error rate observed by clients during that window (should drop to near-zero once removal completes, proving traffic actually stopped routing there). I'd repeat that under real production-level request volume, not idle load, since Kubernetes' failureThreshold counts probe attempts, not wall-clock time, and probe interval combined with realistic traffic patterns determines the actual user-facing blast radius before removal completes.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Staff</span>
+      <h4>Why does this project treat 'Kubernetes shows the pod as Ready' as a real bug worth fixing, rather than 'well, the application logic itself was still working correctly, just misreporting'?</h4>
+      <p>Because from the perspective of anyone actually depending on this system — an on-call engineer looking at <code>kubectl get pods</code>, an SLO dashboard, a load balancer's routing decision — 'the pod says Ready' and 'the pod is actually serving correctly' are supposed to be the same fact, and when they diverge, every downstream consumer of that signal is now silently wrong. It doesn't matter that the internal circuit breaker logic was itself functioning correctly (it genuinely knew it was in the OPEN state) — the bug was entirely in the translation layer between 'what the app knows internally' and 'what Kubernetes can observe externally', and that translation layer is exactly as load-bearing as the internal logic itself, since nothing outside the process can act on internal state it can't observe.</p>
+    </div>
+
     <div class="footer-nav">
       <a href="index.html">← back to all flowcharts</a>
       <a href="https://github.com/abhi32dev/ai-infrastructure-platform-2/tree/main/16-kubernetes-ml" target="_blank" rel="noopener">16-kubernetes-ml source ↗</a>

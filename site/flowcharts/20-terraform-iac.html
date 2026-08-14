@@ -64,6 +64,61 @@
       <span class="path">ALLDONE → VERIFYSCRIPT → S3TEST(ok) + DDBTEST(ok) + SQSTEST(ok) → ALLPASS(Yes) → VERIFIED</span>
     </div>
 
+    <div class="section-head"><h2>What this project actually does &amp; architecture trade-offs</h2></div>
+    <div class="arch-grid">
+      <div class="arch-block does">
+        <h4>What it does</h4>
+        <ul>
+        <li>Provisions real AWS-API-compatible infrastructure (S3, DynamoDB, SQS with a DLQ) against LocalStack via Terraform, letting Terraform's dependency graph automatically order resource creation from implicit references — no manual <code>depends_on</code> needed for the DLQ-ARN-in-redrive-policy relationship.</li>
+        <li>Goes beyond 'terraform apply succeeded' by running a separate verification script that proves actual usability via real write-then-read round trips (put/get on S3, put/get on DynamoDB, send/receive on SQS) through boto3.</li>
+        <li>Reads resource identifiers for verification from <code>terraform output -json</code> rather than hardcoding them, so a naming-convention change in the Terraform config surfaces as a clear verification failure rather than a silent mismatch.</li>
+        </ul>
+      </div>
+      <div class="arch-block limits">
+        <h4>Known limitations</h4>
+        <ul>
+        <li>Runs against LocalStack, not real AWS — proves the Terraform configuration and resource-dependency logic are correct, but doesn't validate real AWS-specific behaviors (IAM policy edge cases, real network latency, real service quotas/throttling) that only manifest against the actual cloud.</li>
+        <li>No remote state backend (S3+DynamoDB locking) configured — state is local, which is fine for a single-developer demo but wouldn't support real team collaboration without state-locking to prevent concurrent-apply conflicts.</li>
+        <li>No cost estimation or policy-as-code (e.g. tflint, Sentinel, OPA) integrated into the pipeline — the configuration is correct and verified functionally, but not checked against cost or security-policy guardrails before apply.</li>
+        </ul>
+      </div>
+      <div class="arch-block tradeoffs">
+        <h4>Architectural trade-offs</h4>
+        <ul>
+        <li>LocalStack over a real AWS sandbox account for the demo — zero cost, fully reproducible, runs entirely locally, at the cost of not validating real-AWS-specific edge cases that only a genuine cloud environment would expose.</li>
+        <li>Implicit dependency ordering (via Terraform's own reference-graph inference) over explicit <code>depends_on</code> — cleaner, more idiomatic Terraform that self-documents the actual dependency relationship through the reference itself, at the cost of requiring the dependency to be expressible as an attribute reference (which it is here — the DLQ ARN naturally flows into the redrive policy).</li>
+        <li>A separate Python verification script over relying on Terraform's own apply success as the correctness signal — costs an extra script to write and maintain, but catches the class of bug where infrastructure is created successfully yet isn't actually usable (wrong permissions, wrong resource configuration) that <code>terraform apply</code> succeeding alone can't detect.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="section-head"><h2>Principal / Staff engineer interview questions</h2></div>
+    <div class="qa-card">
+      <span class="qa-level">Staff</span>
+      <h4>Walk through exactly how Terraform infers the DLQ-before-main-queue creation order without an explicit `depends_on`. Why is that better than being explicit?</h4>
+      <p>The main queue's <code>redrive_policy</code> attribute contains an expression referencing <code>aws_sqs_queue.ingestion_dlq.arn</code> — during Terraform's plan phase, it builds a dependency graph by parsing every resource's attributes for exactly these cross-resource references, and any resource whose configuration references another resource's attribute is automatically ordered after that resource's creation. This is better than explicit <code>depends_on</code> because the dependency is self-documenting and impossible to get out of sync — the code that expresses 'the main queue needs the DLQ's ARN' IS the code that establishes the ordering, so there's no way to update one without the other silently going stale, which is exactly the risk with a separate, manually-maintained <code>depends_on</code> declaration that isn't tied to an actual data dependency.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Principal</span>
+      <h4>Your verification script proves resources are usable via real read/write round trips. What class of production incident does that actually catch that 'terraform apply succeeded' wouldn't?</h4>
+      <p>The classic case: a resource that's created successfully but is functionally broken due to an IAM permission gap, a misconfigured bucket policy, an incorrect VPC/security-group setting, or a resource property that's syntactically valid but semantically wrong (e.g. an SQS queue created with a redrive policy pointing at the wrong DLQ ARN due to a typo in a variable reference) — all of these pass <code>terraform apply</code> cleanly, because Terraform's job is applying the configuration as written, not validating that the configuration achieves the intended functional outcome. A real production incident I'd expect this to catch: a Terraform-provisioned S3 bucket with a bucket policy that inadvertently denies the application's own IAM role — <code>apply</code> succeeds, the bucket exists, and the first real write from the application fails, exactly the gap a real put/get round-trip check closes before it ever reaches production traffic.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Staff</span>
+      <h4>This runs against LocalStack, not real AWS. What's the actual risk of trusting this as 'proof the infrastructure works', and how would you close that gap before a real deployment?</h4>
+      <p>LocalStack emulates AWS APIs faithfully enough to validate configuration correctness and resource-dependency logic, but it doesn't perfectly replicate every real-AWS behavior — IAM policy evaluation edge cases, real service quotas and throttling behavior, actual cross-region/AZ networking characteristics, and subtle API behavior differences that only the real service exhibits. I'd close the gap with a staged rollout: run this exact same Terraform config and verification script against a real AWS sandbox/dev account before ever touching production, treating the LocalStack pass as a fast, cheap first gate (catches config-logic bugs early and cheaply) rather than the final proof — the same 'cheap check first, expensive check before the real thing' pattern this whole portfolio uses elsewhere (e.g. project 12's guardrail ordering).</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Principal</span>
+      <h4>No remote state/locking is configured. What's the actual failure mode for a real team using this, and what would you change first before letting a second engineer touch this codebase?</h4>
+      <p>Local state means each engineer has their own copy of the state file — if two people run <code>terraform apply</code> concurrently (or even sequentially without pulling the latest state), Terraform has no way to detect the conflict, and you can end up with state drift (Terraform's record of reality diverging from actual infrastructure) or, worse, two applies racing and corrupting each other's changes. Before a second engineer touches this, I'd move state to a remote backend — S3 for the state file itself plus DynamoDB for state locking (ironically using the same two resource types this project already provisions) — so every apply first acquires a lock, preventing concurrent applies entirely, and everyone reads from the same authoritative state rather than a stale local copy.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Staff</span>
+      <h4>Why does the verification script read resource identifiers from `terraform output -json` instead of just hardcoding the expected bucket/table/queue names?</h4>
+      <p>Hardcoding creates two coupled sources of truth — the actual naming logic in the Terraform config, and a second, independent guess at those names in the verification script — which will silently drift the moment either one changes without the other being updated in lockstep, exactly the kind of bug that passes code review because nothing looks wrong in either file individually. Reading from <code>terraform output -json</code> means the verification script always asks Terraform 'what did you actually name this resource', so there's exactly one source of truth; if a naming convention changes in <code>main.tf</code>, the verification script automatically picks up the new name and either verifies correctly against it or fails clearly if something else is actually wrong — it can never silently check the wrong resource due to a stale hardcoded name.</p>
+    </div>
+
     <div class="footer-nav">
       <a href="index.html">← back to all flowcharts</a>
       <a href="https://github.com/abhi32dev/ai-infrastructure-platform-2/tree/main/20-terraform-iac" target="_blank" rel="noopener">20-terraform-iac source ↗</a>

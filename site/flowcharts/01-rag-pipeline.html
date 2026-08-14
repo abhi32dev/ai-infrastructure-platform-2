@@ -81,6 +81,61 @@
       <span class="path">POST /reindex → app.py:reindex() → embed_index.build_index() → returns {"status": "reindexed", "vector_count": N}</span>
     </div>
 
+    <div class="section-head"><h2>What this project actually does &amp; architecture trade-offs</h2></div>
+    <div class="arch-grid">
+      <div class="arch-block does">
+        <h4>What it does</h4>
+        <ul>
+        <li>Builds a from-scratch RAG pipeline: chunk → embed → index (Chroma) → retrieve top-k → ground-check → generate, exposed both as a CLI (<code>pipeline.py</code>) and a FastAPI service (<code>app.py</code>).</li>
+        <li>Decides whether to rebuild the vector index based on a content hash of the source corpus, not a blind rebuild-every-time or never-rebuild policy.</li>
+        <li>Refuses to answer when retrieved context has no real overlap with the query, rather than letting the LLM hallucinate a confident-sounding answer from nothing.</li>
+        </ul>
+      </div>
+      <div class="arch-block limits">
+        <h4>Known limitations</h4>
+        <ul>
+        <li>Single-process, single-node — no sharding, no replica set, no HA story for the vector store.</li>
+        <li>Ground-check is a simple heuristic (keyword/embedding-similarity threshold), not a calibrated faithfulness classifier — it can still be fooled by superficially relevant but substantively wrong context.</li>
+        <li>No incremental indexing: a single changed document triggers a hash mismatch and a full corpus re-embed, which doesn't scale past a small corpus.</li>
+        </ul>
+      </div>
+      <div class="arch-block tradeoffs">
+        <h4>Architectural trade-offs</h4>
+        <ul>
+        <li>Chose content-hash-based rebuild over a file-watcher/event-driven index because it's deterministic and testable without needing a running background process.</li>
+        <li>Chose a hard refuse-to-answer branch over a lower-confidence-but-still-answer approach, prioritizing precision (no hallucination) over recall (always give something).</li>
+        <li>Chroma (embedded, local) over a managed vector DB — zero infra cost for the portfolio, at the cost of horizontal scalability.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="section-head"><h2>Principal / Staff engineer interview questions</h2></div>
+    <div class="qa-card">
+      <span class="qa-level">Staff</span>
+      <h4>Your index rebuild is triggered by a corpus content hash. At 10M documents, why does this design break, and what would you replace it with?</h4>
+      <p>A single hash over the whole corpus means <b>any</b> single-document change invalidates it — at 10M docs you'd re-embed everything for a one-line edit. I'd replace the global hash with per-document content hashes stored alongside each embedding, diff the corpus against that manifest, and only re-embed the delta. That turns an O(n) full-rebuild into an O(changed) incremental update, and is the actual design most production RAG systems (e.g. incremental Chroma/pgvector upserts) use.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Staff</span>
+      <h4>Walk through what happens end-to-end when a query has zero semantic overlap with the corpus — where exactly does the refusal decision get made, and why there instead of in the prompt?</h4>
+      <p>Retrieval still returns the top-k nearest vectors — cosine similarity always returns <i>something</i>, even if everything is far away. The refusal check runs <b>after</b> retrieval, comparing the best similarity score against a threshold, before the context ever reaches the generator. I put it there rather than relying on prompt instructions ('say I don't know if...') because LLMs are unreliable at self-policing groundedness — a code-level gate is deterministic and testable; a prompt instruction is a suggestion the model can ignore under adversarial or ambiguous input.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Principal</span>
+      <h4>If you had to scale this to serve 500 QPS with sub-200ms p99 latency, which component breaks first and what's your mitigation?</h4>
+      <p>Embedding the query itself is usually the bottleneck — a local sentence-transformer call is tens of milliseconds on CPU and doesn't batch well under bursty concurrent load. I'd move query embedding to a small dedicated service with dynamic batching (or a GPU-backed endpoint), add an LRU cache keyed on normalized query text for repeat queries, and separate retrieval (cheap, sub-10ms with an ANN index) from generation (expensive, streams). Chroma itself, embedded in-process, would also need to move to a networked vector DB with replicas to survive that QPS without single-node contention.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Staff</span>
+      <h4>What's the actual failure mode if two requests race to rebuild the index at the same time?</h4>
+      <p>As built, there's no lock around the rebuild — two concurrent 'corpus changed' detections could both start rebuilding, doubling embedding cost and potentially leaving the on-disk Chroma collection in an inconsistent state if both writers interleave. The real fix is a rebuild lock (a lockfile or a DB-backed advisory lock) so only one rebuild runs at a time and late arrivals either wait or no-op once they see the hash already matches — this is a documented, not silently patched, gap in the current implementation.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Principal</span>
+      <h4>How would you evaluate whether this RAG pipeline is actually good, beyond 'it returns an answer'?</h4>
+      <p>I'd separate retrieval quality from generation quality. Retrieval: hit-rate@k and MRR against a labeled query→relevant-doc set (this is exactly what project 04's chunk-size sweep measures for a related pipeline). Generation: faithfulness (does the answer only use claims present in the retrieved context — this project's own ground-check is a cheap proxy for that) and answer relevance, ideally via a second, independent judge model (see project 02's AND-gate pattern) rather than trusting the same model's self-report.</p>
+    </div>
+
     <div class="footer-nav">
       <a href="index.html">← back to all flowcharts</a>
       <a href="https://github.com/abhi32dev/ai-infrastructure-platform-2/tree/main/01-rag-pipeline" target="_blank" rel="noopener">01-rag-pipeline source ↗</a>

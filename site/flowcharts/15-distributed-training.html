@@ -59,6 +59,61 @@
       <span class="path">4× [SHARD → EPOCHLOOP → BACKWARD(no sync)] → SAVERANK → COMPARE(0.3655 apart)</span>
     </div>
 
+    <div class="section-head"><h2>What this project actually does &amp; architecture trade-offs</h2></div>
+    <div class="arch-grid">
+      <div class="arch-block does">
+        <h4>What it does</h4>
+        <ul>
+        <li>Runs real distributed data-parallel (DDP) training across 4 actual OS processes, with a genuine process-group barrier at <code>dist.init_process_group()</code> and a real, verified <code>DistributedSampler</code> data shard per rank.</li>
+        <li>Proves gradient synchronization is real, not assumed: post-training weights are bit-for-bit identical (0.0 L2 distance) across all 4 ranks when DDP-wrapped, versus 0.3655 apart in a no-sync control trained on the same shards without gradient sharing.</li>
+        <li>Demonstrates that <code>loss.backward()</code> transparently triggers an all-reduce across ranks purely because the model is wrapped in <code>DistributedDataParallel</code> — no explicit collective-communication call is visible in the training loop code.</li>
+        </ul>
+      </div>
+      <div class="arch-block limits">
+        <h4>Known limitations</h4>
+        <ul>
+        <li>Uses the <code>gloo</code> backend (CPU-only) rather than <code>nccl</code> (GPU-optimized) — appropriate for a 4-process demo on one machine, but not representative of the multi-node, multi-GPU networking characteristics real large-scale training needs to handle.</li>
+        <li>All 4 ranks run on a single machine — no actual network partition, node failure, or inter-node bandwidth constraint is exercised, which is where most of the real complexity of distributed training lives.</li>
+        <li>No gradient checkpointing, mixed precision, or ZeRO-style optimizer state sharding — this demonstrates DDP's core synchronization mechanism, not the memory/throughput optimizations a real large-model training run would also need.</li>
+        </ul>
+      </div>
+      <div class="arch-block tradeoffs">
+        <h4>Architectural trade-offs</h4>
+        <ul>
+        <li>gloo backend over nccl — works identically on CPU without requiring GPU hardware, making the demo runnable anywhere, at the cost of not exercising the GPU-specific communication path that dominates real large-scale training performance.</li>
+        <li>A no-sync control run over trusting DDP's synchronization by documentation/assumption alone — costs an extra full training run, but converts 'DDP synchronizes gradients' from an assumed library guarantee into a directly measured, falsifiable result (0.0 vs 0.3655 L2 distance).</li>
+        <li>Single-machine multi-process over actual multi-node — zero infrastructure cost and fully reproducible locally, at the cost of not testing the network-partition and node-failure scenarios that dominate real distributed-training operational complexity.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="section-head"><h2>Principal / Staff engineer interview questions</h2></div>
+    <div class="qa-card">
+      <span class="qa-level">Staff</span>
+      <h4>Walk through exactly what `loss.backward()` does differently when the model is DDP-wrapped versus not, at the mechanism level.</h4>
+      <p>Normally, <code>loss.backward()</code> just computes local gradients via autograd and stores them in each parameter's <code>.grad</code>. When the model is wrapped in <code>DistributedDataParallel</code>, DDP registers autograd hooks on each parameter that fire as soon as that parameter's local gradient is computed — those hooks trigger an asynchronous all-reduce (average) of that gradient across all ranks in the process group, overlapping communication with the remaining backward computation for efficiency. By the time <code>backward()</code> returns, every rank's <code>.grad</code> for every parameter holds the identical, averaged gradient across all ranks — which is exactly why the post-training weights end up bit-for-bit identical: every rank applied the exact same averaged gradient at every step, even though each started from a different data shard.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Principal</span>
+      <h4>This demo uses gloo on one machine. What actually changes moving to nccl across multiple GPU nodes, and what new failure modes appear that don't exist in this demo?</h4>
+      <p>Mechanically, the API barely changes — swap the backend string, and the same <code>init_process_group</code>/DDP-wrap/backward pattern holds, because that abstraction is the whole point of the collective-communication library design. What changes substantially: nccl's collectives are GPU-topology-aware (NVLink within a node, network fabric across nodes) and dramatically faster for GPU tensors, but you now have real network partition risk between nodes (a node dropping off mid-training needs a coordinated failure response — checkpoint-and-restart, or elastic training with <code>torchrun</code>'s fault-tolerance features), real inter-node bandwidth bottlenecks that can make communication rather than compute the limiting factor, and node-heterogeneity risk (one slower node straggling and stalling the whole synchronous all-reduce) — none of which a single-machine 4-process gloo demo can expose, because there's no real network in the loop.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Staff</span>
+      <h4>You measured 0.3655 L2 distance in the no-sync control. Is that number itself meaningful, or just 'not zero'? How would you interpret its magnitude?</h4>
+      <p>On its own, 0.3655 mostly just proves the point that no-sync training genuinely diverges — the specific magnitude is a function of this model's parameter count, initialization, learning rate, and how many steps of divergence accumulated, so it's not directly comparable to a different model/setup's L2 distance without normalizing (e.g. as a fraction of the weight vector's own norm, or tracking how it grows over training steps). What would make it more meaningful: plotting L2 distance across training steps to see the divergence curve — is it growing linearly, accelerating, or plateauing — which would tell you whether the four ranks' models are drifting apart at a constant rate (each seeing permanently different data) or converging toward different but stable local optima, a genuinely different question about the loss landscape.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Principal</span>
+      <h4>If a straggler rank is consistently 3x slower than the others due to a hardware issue, what happens to this training loop, and how would you handle it in production?</h4>
+      <p>Synchronous DDP is only as fast as its slowest rank — every rank's <code>backward()</code> all-reduce blocks until all ranks have contributed their local gradient, so a 3x-slower straggler means every other rank sits idle waiting on every single step, and the entire job runs at the straggler's pace, not the average pace. In production I'd first try to detect and evict/replace the bad hardware (most large training frameworks have straggler-detection heartbeats), and for jobs that can tolerate it, consider asynchronous or semi-synchronous training strategies (e.g. bounded staleness) that don't require every rank to fully synchronize every single step — though that trades off the exact reproducibility this demo's 0.0 L2 distance result depends on, since asynchronous updates no longer guarantee every rank ends up with identical weights.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Staff</span>
+      <h4>Why is `dist.init_process_group()` a barrier — all ranks must call it before any proceeds? What would go wrong if it weren't?</h4>
+      <p>It's a barrier because the process group is a shared coordination primitive — every rank needs to agree on who's in the group, what rank each member holds, and how to reach each other, before any collective operation (like the all-reduce inside <code>backward()</code>) can possibly work correctly. If it weren't a barrier — say rank 0 proceeded to a collective operation before rank 3 had joined the group — that collective would either hang waiting for a participant that hasn't registered yet, or worse, silently execute among a subset of ranks with no error, producing gradients that were 'synchronized' across only some of the ranks while the others trained independently — exactly the kind of silent correctness bug that the no-sync control in this project is designed to make visible and measurable rather than assumed away.</p>
+    </div>
+
     <div class="footer-nav">
       <a href="index.html">← back to all flowcharts</a>
       <a href="https://github.com/abhi32dev/ai-infrastructure-platform-2/tree/main/15-distributed-training" target="_blank" rel="noopener">15-distributed-training source ↗</a>

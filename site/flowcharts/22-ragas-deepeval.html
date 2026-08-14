@@ -63,6 +63,61 @@
       <span class="path">DEMETRIC → JSONPARSE(fails on this input) → RAISEVALUEERR  |  DEMETRIC → JSONPARSE(succeeds on a simpler input) → DERESULT</span>
     </div>
 
+    <div class="section-head"><h2>What this project actually does &amp; architecture trade-offs</h2></div>
+    <div class="arch-grid">
+      <div class="arch-block does">
+        <h4>What it does</h4>
+        <ul>
+        <li>Evaluates the same RAG pipeline through two independent open-source frameworks (Ragas and DeepEval), each using a local judge model, to cross-validate evaluation results rather than trusting a single framework's numbers.</li>
+        <li>Found and fixed a real concurrency bug: Ragas' default concurrency assumes a cloud judge API that handles many parallel requests, which overwhelmed a local CPU-bound Ollama judge — fixed via <code>RunConfig(max_workers=2)</code>, recovering most <code>context_precision</code> scores from NaN to real numbers.</li>
+        <li>Surfaced a real, non-deterministic failure mode in DeepEval: the exact same FaithfulnessMetric + small local judge model combination raised a hard <code>ValueError</code> on one test case's JSON-parsing and returned a valid score on a simpler one — reproducible intermittent behavior, not a one-off fluke.</li>
+        </ul>
+      </div>
+      <div class="arch-block limits">
+        <h4>Known limitations</h4>
+        <ul>
+        <li>Both frameworks were run with small, local judge models (for zero-cost, fully local evaluation) — their absolute score reliability is materially weaker than what either framework would produce with a frontier-model judge, which this project is honest about rather than presenting scores as if they were frontier-judge-quality.</li>
+        <li>No cross-framework score correlation analysis — Ragas and DeepEval were each shown to work (post-fix) on this pipeline, but the project doesn't measure how well their scores agree/disagree on the same test cases, which would be the natural next validation step.</li>
+        <li>DeepEval's intermittent JSON-parse failure is documented but not worked around (e.g. with a retry-with-reformatting wrapper) — treated as an honest finding about small local judge reliability, not silently patched.</li>
+        </ul>
+      </div>
+      <div class="arch-block tradeoffs">
+        <h4>Architectural trade-offs</h4>
+        <ul>
+        <li>max_workers=2 over the framework default — directly matched to the actual capacity of a local CPU-bound Ollama judge rather than a cloud-API-oriented default, at the cost of slower total evaluation wall-clock time versus higher (but broken) concurrency.</li>
+        <li>Running two independent evaluation frameworks over standardizing on one — costs extra setup/maintenance of two integration paths, but surfaces framework-specific bugs (like the concurrency issue) and failure modes (like DeepEval's JSON-parse fragility) that a single framework's blind spots could otherwise hide entirely.</li>
+        <li>Documenting DeepEval's loud ValueError as a finding rather than suppressing/retrying past it — preserves the actual signal that small local judge models are unreliable for this framework's strict JSON-output requirement, which is more useful information than a silently-recovered, artificially smoothed-over result.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="section-head"><h2>Principal / Staff engineer interview questions</h2></div>
+    <div class="qa-card">
+      <span class="qa-level">Staff</span>
+      <h4>Walk through exactly why Ragas' default concurrency broke against a local Ollama judge, and why `max_workers=2` was the right fix rather than just retrying failed calls.</h4>
+      <p>Ragas' default concurrency settings are tuned for the common case — a cloud judge API (OpenAI, Anthropic) that can genuinely handle many parallel requests with its own internal load balancing and rate limiting. A local Ollama instance serving a small model on CPU has none of that — it's effectively a single-threaded (or lightly-parallel) inference server, so firing Ragas' default level of concurrent judge calls at it caused requests to time out or fail outright, which surfaced as NaN scores for metrics like <code>context_precision</code> rather than a clear error. Retrying failed calls would have treated the symptom (individual call failures) without fixing the cause (too much concurrent load for the judge's real capacity) — reducing <code>max_workers</code> to match what the local judge can actually sustain fixes the root cause directly, which is why it recovered most of the NaN scores to real numbers rather than just reducing the failure rate.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Principal</span>
+      <h4>You ran two independent frameworks and found they have different failure modes (silent NaN vs. loud ValueError). Which failure mode is actually worse in a production evaluation pipeline, and why?</h4>
+      <p>Silent NaN is worse, and it's not close — a loud <code>ValueError</code> stops the pipeline and demands attention, which is exactly the right behavior for 'this measurement failed and I don't have a trustworthy number', while a silent NaN can flow downstream into an aggregate metric calculation (an average, a dashboard) where it either gets implicitly excluded (silently shrinking your effective sample size without anyone noticing) or, worse, corrupts an aggregate calculation that doesn't explicitly guard against NaN. This is exactly why finding and fixing the concurrency bug mattered more than it might first appear — it converted Ragas' failure mode from 'silently wrong or silently incomplete numbers that look like real results' into 'actually working numbers', which is a categorically different and more dangerous class of problem than DeepEval's loud failure, even though the loud failure looks worse on the surface.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Staff</span>
+      <h4>DeepEval's JSON-parse failure is intermittent — same model, same metric, different input text. What does 'intermittent' actually tell you about the root cause here, and how would you investigate further?</h4>
+      <p>Intermittent, input-dependent failure with a fixed model and fixed metric points toward the small judge model's own output reliability being input-sensitive — some prompts happen to elicit a cleanly-formatted JSON response from a 1B-parameter model, others (likely more complex or ambiguous reasoning cases) push it toward verbose, hedging, or malformed output that breaks strict JSON parsing. I'd investigate by collecting the actual raw judge outputs (not just the parse failures) across a larger sample of test cases, and look for a pattern — is it correlated with input length, with the complexity of the faithfulness judgment being asked, or with specific phrasings that seem to derail the model into non-JSON reasoning-out-loud text — that would tell you whether the fix is a better output-format prompt, a larger judge model, or an output-repair/retry step that specifically handles near-miss malformed JSON.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Principal</span>
+      <h4>How would you actually decide whether Ragas and DeepEval's scores on the same test cases are trustworthy, versus just superficially different numbers that don't mean anything comparable?</h4>
+      <p>I'd run both frameworks against the same test set and the same underlying judge model (controlling that variable), then look at rank correlation (Spearman) between their per-example scores, not raw score agreement — different frameworks often use different scales/formulas for conceptually similar metrics (faithfulness, precision), so exact numeric agreement isn't the right bar, but they should broadly agree on <i>which</i> examples are good versus bad if both are measuring something real. Strong rank correlation with different absolute scales is reassuring; if the two frameworks disagree even on relative ranking of the same examples, that's evidence at least one of them isn't measuring something reliable for this pipeline, and I'd dig into disagreement cases specifically to understand why, rather than trusting either framework's absolute numbers on faith.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Staff</span>
+      <h4>Both frameworks used small local judge models. What's your actual argument for why that's still a valid evaluation approach, rather than 'just use GPT-4 as the judge and skip all this'?</h4>
+      <p>For a portfolio/demo project specifically, local judges keep the entire pipeline reproducible at zero cost and with no external API dependency — anyone can clone and re-run it identically. The honest trade-off, which this project doesn't hide, is that a 1B-2B parameter local judge is a materially weaker evaluator than a frontier model — its scores should be read as directional signal ('did this change make things obviously better or worse') rather than as precise, trustworthy absolute quality numbers. For a real production evaluation pipeline where the cost of a wrong ship/no-ship decision is high, I'd use a frontier-model judge (accepting the cost and external dependency) for the final gating decision, while a fast local judge could still be valuable as a cheap, fast first-pass signal during iterative development — the two aren't mutually exclusive, they serve different points in the development lifecycle.</p>
+    </div>
+
     <div class="footer-nav">
       <a href="index.html">← back to all flowcharts</a>
       <a href="https://github.com/abhi32dev/ai-infrastructure-platform-2/tree/main/22-ragas-deepeval" target="_blank" rel="noopener">22-ragas-deepeval source ↗</a>

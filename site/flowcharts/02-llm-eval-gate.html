@@ -71,6 +71,61 @@
       <span class="path">GEN raw="not json" → GENPARSE(fails) → GENFAIL(REJECT) → ANDGATE(False) → BLOCKED</span>
     </div>
 
+    <div class="section-head"><h2>What this project actually does &amp; architecture trade-offs</h2></div>
+    <div class="arch-grid">
+      <div class="arch-block does">
+        <h4>What it does</h4>
+        <ul>
+        <li>Gates any automated action behind two independent models — a generator that proposes an action and a judge that reviews it — and only executes when both approve.</li>
+        <li>Neither model sees the other's reasoning, specifically to avoid the judge rubber-stamping a confident-sounding but wrong rationale from the generator.</li>
+        <li>Logs every decision, approved or blocked, to an append-only audit log unconditionally.</li>
+        </ul>
+      </div>
+      <div class="arch-block limits">
+        <h4>Known limitations</h4>
+        <ul>
+        <li>Both models are small local models (llama3.2:1b, qwen2.5:1.5b) chosen for zero-cost local demo — their judgment quality is materially weaker than a frontier model, and the README documents observed disagreements as a real, not hidden, limitation.</li>
+        <li>The AND-gate has no tie-breaking or escalation path — a persistent generator/judge disagreement just blocks forever with no human-in-the-loop escalation built in.</li>
+        <li>No adversarial robustness testing — an attacker who understands both models' blind spots could in principle craft an action description that fools both.</li>
+        </ul>
+      </div>
+      <div class="arch-block tradeoffs">
+        <h4>Architectural trade-offs</h4>
+        <ul>
+        <li>AND-logic (both must approve) over OR-logic or a weighted vote — deliberately biased toward false rejections over false approvals, since blocking a safe action is cheaper than executing an unsafe one.</li>
+        <li>Two heterogeneous small models over one larger model — diversity of failure modes was judged more valuable than raw capability at this cost point, though this is unverified against a single-larger-model baseline.</li>
+        <li>Fail-safe-to-REJECT on JSON parse failure over retry-with-backoff — simpler and more predictable, at the cost of extra false rejections on transient formatting hiccups.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="section-head"><h2>Principal / Staff engineer interview questions</h2></div>
+    <div class="qa-card">
+      <span class="qa-level">Staff</span>
+      <h4>Why AND-gate two small models instead of using one larger, presumably more capable model?</h4>
+      <p>Two independent models with different training data and failure modes give you decorrelated errors — the case in the scenario cards where the generator (llama3.2:1b) over-cautiously REJECTs a legitimate rollback while the judge (qwen2.5:1.5b) correctly APPROVEs it shows the models don't fail the same way. A single larger model is still a single point of failure: if it's wrong, there's no second opinion. The trade-off is cost (two inference calls) and latency (both must complete) versus a meaningfully different reliability profile — this is the same rationale as N-version programming in safety-critical systems, applied to LLM decisions.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Principal</span>
+      <h4>This is essentially a binary classifier ensemble. How would you actually validate that the AND-gate's precision/recall profile is what you want, rather than assuming it from design intuition?</h4>
+      <p>I'd build a labeled dataset of (situation, correct_decision) pairs — including edge cases and adversarial phrasings — and measure the gate's confusion matrix against ground truth, not just individual-model accuracy. The metric that matters here is the <b>false-approve rate</b> (a genuinely unsafe action getting through), which should be near zero, even if that costs a higher false-reject rate. Right now this project has none of that: the scenario cards are illustrative examples, not a statistically powered evaluation. That's the honest gap I'd close before trusting this in production.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Staff</span>
+      <h4>Both models are asked for JSON. What's your actual strategy when a model returns malformed JSON in a live gating system — and why does this project fail closed instead of retrying?</h4>
+      <p>The code wraps <code>json.loads()</code> in try/except and treats a parse failure as an implicit REJECT for that model's side of the gate — never as an implicit APPROVE. I chose fail-closed over retry-with-backoff for a gating decision specifically because retrying changes timing and could itself be exploited (e.g. an attacker inducing malformed output on the first attempt, betting a retry samples differently); a gating system should be conservative under any uncertainty, parse failure included.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Principal</span>
+      <h4>How would this design change if the action being gated had real financial or safety consequences — say, a $2M wire transfer — instead of a simulated infra action?</h4>
+      <p>I'd add a minimum of three things this project doesn't have: (1) a genuinely independent secondary channel for the judge — not just a different model, but ideally a different modality of check (a rules engine, a human approver, or an out-of-band confirmation) so a shared LLM blind spot can't defeat both sides at once; (2) a hard rate/amount ceiling enforced outside the LLM layer entirely, since no LLM-based gate should be the sole guard on an unbounded-magnitude action; (3) mandatory human sign-off above a threshold, with the AND-gate only handling the sub-threshold, high-volume, low-risk tier.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Staff</span>
+      <h4>The audit log write happens 'unconditionally' per your own diagram. What does that guarantee actually buy you, and what does it NOT guarantee?</h4>
+      <p>It guarantees every decision — approved or blocked — has a record, so you can reconstruct 'what did the system decide and why' after the fact, which is essential for debugging disagreements and for compliance review. It does <b>not</b> guarantee durability under a crash between the decision and the log write (no fsync/transactional guarantee is documented), and it doesn't guarantee the log itself wasn't tampered with — for a real audit trail you'd want an append-only, ideally hash-chained log (or write to a system that provides that, like a WORM bucket or a ledger), which is outside this demo's scope.</p>
+    </div>
+
     <div class="footer-nav">
       <a href="index.html">← back to all flowcharts</a>
       <a href="https://github.com/abhi32dev/ai-infrastructure-platform-2/tree/main/02-llm-eval-gate" target="_blank" rel="noopener">02-llm-eval-gate source ↗</a>

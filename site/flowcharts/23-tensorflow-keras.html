@@ -63,6 +63,61 @@
       <span class="path">COMPARELOOP×20 → KERASPRED vs TFLITEPRED → AGREECHECK(match, all 20) → FINALRESULT(100% agreement)</span>
     </div>
 
+    <div class="section-head"><h2>What this project actually does &amp; architecture trade-offs</h2></div>
+    <div class="arch-grid">
+      <div class="arch-block does">
+        <h4>What it does</h4>
+        <ul>
+        <li>Diagnosed a real Keras API-compatibility break across two wrong guesses (a <code>path=</code> kwarg, then a <code>cache_dir=</code> kwarg, both with misleading error messages) before resolving it by directly inspecting <code>inspect.signature(mnist.load_data)</code> to find the real, undocumented signature.</li>
+        <li>Uses Keras' idiomatic callback system (<code>EarlyStopping(patience=2, restore_best_weights=True)</code>, <code>ModelCheckpoint(save_best_only=True)</code>) rather than a hand-rolled training loop, contrasting with the manual PyTorch training loops used elsewhere in the portfolio.</li>
+        <li>Proves the TFLite export preserved model behavior — not just that conversion didn't error — by running all 20 real held-out samples through both the original Keras model and the exported TFLite interpreter and confirming 100% prediction agreement.</li>
+        </ul>
+      </div>
+      <div class="arch-block limits">
+        <h4>Known limitations</h4>
+        <ul>
+        <li>Small demo scope (MNIST, 5 epochs with early stopping) — sufficient to demonstrate the callback-driven training pattern and export-correctness verification methodology, not representative of a production-scale training run's duration or dataset complexity.</li>
+        <li>The API-signature debugging process (two wrong guesses before the real fix) is documented as a real finding, but no regression test was added to catch a future Keras version re-breaking this specific API call — a genuine gap if this pipeline needed to survive future Keras upgrades unattended.</li>
+        <li>The TFLite export/agreement check only validates prediction-class agreement, not raw output-probability closeness — two predictions could agree on the top class while their underlying confidence distributions diverge more than this check would catch.</li>
+        </ul>
+      </div>
+      <div class="arch-block tradeoffs">
+        <h4>Architectural trade-offs</h4>
+        <ul>
+        <li>Directly inspecting the real function signature via <code>inspect.signature()</code> over continuing to guess at the API based on error-message hints — slower in the moment, but converts a trial-and-error debugging loop into a definitive answer, and is the generalizable technique for any undocumented/poorly-documented API break.</li>
+        <li>Keras' built-in callback system over a manual epoch loop — less code and more idiomatic for this framework, at the cost of some of the explicit step-by-step visibility a hand-rolled loop (like project 15's DDP training loop) gives you into exactly what happens each epoch.</li>
+        <li>Checking prediction-class agreement (not full probability-distribution closeness) for the export verification — a simpler, sufficient check for 'did the export preserve the model's actual decisions', at the cost of not catching subtler numerical drift in the underlying probabilities that a stricter check would surface.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="section-head"><h2>Principal / Staff engineer interview questions</h2></div>
+    <div class="qa-card">
+      <span class="qa-level">Staff</span>
+      <h4>Walk through your actual debugging process for the two wrong API guesses. What made you stop guessing from error messages and go straight to `inspect.signature()`?</h4>
+      <p>Both wrong guesses were driven by literally trying what the error message itself suggested — the first ValueError said paths are no longer accepted, use <code>cache_dir</code>; the second attempt (using <code>cache_dir</code>) then raised a TypeError saying that kwarg doesn't exist either, meaning the error message's own suggested fix was itself wrong or referred to a different version of the API. That contradiction — the error telling you to do something that then also fails — is the actual signal to stop trusting error-message hints and go to ground truth: <code>inspect.signature()</code> gives you the real, currently-installed function's actual parameter names directly from the runtime object, which can't be stale or wrong the way documentation or an error message's suggested fix can be. The general lesson: error messages are hints written by someone, possibly for a different version than what you have installed — the function's live signature is the actual, unambiguous source of truth.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Principal</span>
+      <h4>You didn't add a regression test to catch this API break again on a future Keras upgrade. Should you have, and what would that test look like?</h4>
+      <p>For a project meant to be run once as a portfolio demo, skipping it is a reasonable scope call — but for any pipeline meant to survive unattended across dependency upgrades, yes, I'd add a lightweight smoke test that specifically calls <code>mnist.load_data()</code> (or whatever the fragile API surface is) and asserts on the shape/type of the returned data, run as part of CI on every dependency update. The value of that test isn't catching THIS specific bug again (now that it's fixed, it's fixed) — it's catching the <i>next</i> undocumented signature change early and loudly, in CI, rather than as a confusing runtime error discovered mid-training run, which is a much more expensive and disruptive place to first encounter an API break.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Staff</span>
+      <h4>Why check prediction-CLASS agreement between Keras and TFLite rather than comparing raw output probabilities directly? What's the actual risk of the simpler check you chose?</h4>
+      <p>Class agreement answers the question that actually matters for most deployment purposes — does the exported model make the same decisions as the original — and it's robust to the small, expected numerical differences that TFLite's different inference engine and (if applied) any post-training quantization can introduce, without those expected differences causing false alarms. The risk: two models could agree on the top predicted class while having meaningfully different confidence levels underneath (e.g. Keras 90% confident, TFLite 51% confident, same top class) — for applications where calibrated confidence matters (not just the top prediction), that drift would go undetected by a class-agreement-only check, and I'd add a probability-closeness check (e.g. max absolute difference per class, or KL divergence) specifically for those use cases.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Principal</span>
+      <h4>This uses Keras' built-in EarlyStopping/ModelCheckpoint callbacks instead of a manual loop like project 15's PyTorch training. What's the actual engineering trade-off between framework-provided training loops and hand-rolled ones?</h4>
+      <p>Framework callbacks (EarlyStopping, ModelCheckpoint) are well-tested, handle edge cases you might not think of (what exactly counts as 'no improvement', how ties are broken, checkpoint atomicity), and require far less code — the right default for standard training patterns like this one. A hand-rolled loop (as in project 15's DDP training, where the loop itself needed explicit control over each rank's per-step behavior for the distributed-training demonstration) is the right choice specifically when you need visibility into or control over something the framework's abstraction doesn't expose — in DDP's case, that's making the per-step gradient-synchronization mechanism directly observable, which is the whole point of that project. The trade-off is genuinely 'use the framework abstraction unless you have a specific reason the abstraction hides something you need to see or control', not a blanket preference either way.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Staff</span>
+      <h4>The whole API-signature debugging story — is that just a Keras quirk, or does it reveal something more general about working with ML framework APIs at the staff level?</h4>
+      <p>It's general, not Keras-specific: ML frameworks evolve fast, deprecate and rename kwargs across versions, and their error messages — while usually well-intentioned — are written by humans who don't always keep every message in sync with every code path across every version, so an error message's suggested fix can itself be stale. The staff-level habit this demonstrates is not trusting secondhand information (documentation, error messages, Stack Overflow answers pinned to a different version) over primary sources (the actual installed code's real behavior) when the two disagree — <code>inspect.signature()</code>, reading the actual library source, or a quick REPL experiment against the real installed version are all instances of the same underlying discipline: verify against ground truth, especially when your first two attempts based on secondhand hints both failed.</p>
+    </div>
+
     <div class="footer-nav">
       <a href="index.html">← back to all flowcharts</a>
       <a href="https://github.com/abhi32dev/ai-infrastructure-platform-2/tree/main/23-tensorflow-keras" target="_blank" rel="noopener">23-tensorflow-keras source ↗</a>

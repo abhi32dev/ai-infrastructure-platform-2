@@ -63,6 +63,61 @@
       <span class="path">POINTLOOP(short dip, &lt;6 points) → RUNENDCHECK(No) → DISCARDRUN — no alert, no cost impact</span>
     </div>
 
+    <div class="section-head"><h2>What this project actually does &amp; architecture trade-offs</h2></div>
+    <div class="arch-grid">
+      <div class="arch-block does">
+        <h4>What it does</h4>
+        <ul>
+        <li>Detects sustained GPU idle windows (30+ minutes below a 15% utilization threshold) as real cost waste, while explicitly NOT flagging momentary utilization dips — the negative-case test verifies a short dip during real training never triggers a false alert.</li>
+        <li>Raises a KeyError, deliberately, on an unrecognized GPU type in the rate card rather than silently defaulting to $0 cost — a wrong cost of $0 would corrupt the entire cost report invisibly, which the code refuses to allow.</li>
+        <li>Uses a dollar-based alert threshold (<code>ALERT_IDLE_COST_THRESHOLD = $5.00</code>) rather than a percentage-based one, so the alert scales sensibly across GPU types with very different hourly rates instead of treating a cheap and an expensive GPU's idle time as equally alarming at the same percentage.</li>
+        </ul>
+      </div>
+      <div class="arch-block limits">
+        <h4>Known limitations</h4>
+        <ul>
+        <li>Idle detection is threshold-based on a single utilization metric — doesn't account for GPU memory usage, which can indicate a job is 'idle-looking' on compute utilization while still legitimately holding resources (e.g. between batches in a data-loading-bound training step).</li>
+        <li>Fixed 30-minute sustained-window requirement — doesn't adapt to job type; a genuinely idle instance for 25 minutes (just under the threshold) between short jobs wouldn't be flagged, a real detection-boundary gap.</li>
+        <li>No automated remediation — the system detects and alerts on waste but doesn't itself terminate or reclaim idle instances, leaving the actual cost-recovery action to a human.</li>
+        </ul>
+      </div>
+      <div class="arch-block tradeoffs">
+        <h4>Architectural trade-offs</h4>
+        <ul>
+        <li>A 6-point (30-minute) sustained-window requirement over a shorter or instantaneous threshold — deliberately tuned to distinguish real waste from normal training noise (data-loading stalls, checkpoint saves), at the cost of a real ~25-minute idle window slipping under the detection threshold undetected.</li>
+        <li>Hard KeyError on unrecognized GPU type over a silent $0 default — forces the rate card to be kept current as new GPU types are added, at the cost of the whole analysis crashing on an unrecognized type rather than degrading gracefully (a deliberate trade favoring correctness over availability for a cost report).</li>
+        <li>Dollar-threshold alerting over percentage-threshold — correctly weighs alert priority by actual dollar impact rather than relative idle percentage, at the cost of needing an accurate, maintained rate card for the dollar conversion to mean anything.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="section-head"><h2>Principal / Staff engineer interview questions</h2></div>
+    <div class="qa-card">
+      <span class="qa-level">Staff</span>
+      <h4>Walk through exactly why a 6-point sustained window is the right way to distinguish real waste from training noise, rather than just alerting on any utilization dip.</h4>
+      <p>GPU utilization during genuinely active training is naturally spiky — data loading between batches, checkpoint saves, gradient synchronization pauses in distributed training (exactly the kind of brief low-utilization moment project 15's DDP training would show) all cause momentary utilization dips that are completely normal and not waste. Requiring the dip to persist for 6 consecutive 5-minute readings (30 minutes) filters out that normal noise while still catching the actual waste pattern this project is designed to detect: a training job that finished and the instance was simply never torn down, which shows sustained near-zero utilization indefinitely, not a brief dip. The specific threshold (30 minutes) is a judgment call balancing false positives (flagging normal training pauses) against detection lag (real waste sitting undetected a bit longer) — tunable per organization's actual workload patterns.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Principal</span>
+      <h4>Why raise a hard KeyError on an unrecognized GPU type instead of defaulting to $0 or the average known rate? Isn't crashing the whole report worse than an imperfect cost estimate?</h4>
+      <p>A silent $0 default is actively worse than crashing, because it corrupts the report without any visible signal — every downstream number (team rollups, total cost, alert thresholds) that includes that instance would be silently wrong, and nobody reviewing the final report has any way to know some subset of the numbers are fabricated zeros. A hard crash is loud, immediate, and points precisely at the actual gap (an unrecognized GPU type, meaning the rate card needs updating) — which is a maintenance cost worth paying deliberately (someone has to update the rate card when new GPU types are provisioned) rather than accepting the alternative: a cost report that looks complete and trustworthy while silently containing wrong numbers, which is a much more dangerous failure mode for something people make budget decisions from.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Staff</span>
+      <h4>Your alert threshold is dollar-based, not percentage-based. Give a concrete case where a percentage-based threshold would give the wrong prioritization, and dollar-based gets it right.</h4>
+      <p>Consider two instances: a cheap GPU at $0.50/hr sitting 80% idle (high percentage, but only a few dollars of real waste even over hours) versus an expensive GPU at $15/hr sitting 20% idle (much lower percentage, but that 20% idle time on a $15/hr instance can easily exceed the cheap instance's total waste in absolute dollars). A percentage-based alert would flag the first instance as far more urgent (80% vs 20%), when the dollar-based reality is the opposite — the expensive instance's smaller-percentage idle time is actually costing more real money. The dollar threshold correctly prioritizes finance and engineering attention toward where the actual budget impact is largest, which is the metric that should drive alert priority for a cost-governance tool, not a percentage that ignores the instance's actual price.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Principal</span>
+      <h4>This system detects waste but doesn't remediate it. If you had to add automated remediation, what would you build, and what's the biggest risk of getting that wrong?</h4>
+      <p>I'd add a graduated remediation policy, not a single 'kill it' action: on first sustained-idle detection, send a notification to the instance owner with a grace period (e.g. 'this will be reclaimed in 2 hours unless you're still using it'); only auto-terminate after the grace period elapses with no acknowledgment or renewed activity, and even then, snapshot state before termination so a false-positive reclaim doesn't destroy real, in-progress work. The biggest risk of getting this wrong: a false positive that kills a genuinely active job — for instance, a long-running job legitimately idle between infrequent checkpoint-triggered bursts (outside this project's synthetic test patterns) could be misclassified as waste, so any auto-remediation needs a human-override path and a conservative default (notify-and-wait, not immediately terminate) until the false-positive rate is well understood from real production data.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Staff</span>
+      <h4>How would you actually validate, before deploying this in a real org, that the 15% utilization threshold and 30-minute window are the right numbers, rather than reasonable-sounding defaults?</h4>
+      <p>I'd pull a sample of real historical GPU utilization telemetry from the organization's actual instances — including both known-legitimate active training runs and known-actual-waste cases (instances left running after a job finished, confirmed by checking job schedulers/logs) — and tune the threshold and window against that labeled ground truth, treating it as a classification problem: what threshold/window combination maximizes true-positive waste detection while minimizing false positives against known-legitimate training utilization patterns. The 15%/30-minute defaults in this project are reasonable, defensible starting points for a demo, but any specific organization's actual GPU workload characteristics (job types, checkpoint frequency, typical data-loading stalls) could shift the right numbers meaningfully, which is exactly why this should be validated against real data before being trusted for automated remediation decisions with real cost consequences.</p>
+    </div>
+
     <div class="footer-nav">
       <a href="index.html">← back to all flowcharts</a>
       <a href="https://github.com/abhi32dev/ai-infrastructure-platform-2/tree/main/24-gpu-finops" target="_blank" rel="noopener">24-gpu-finops source ↗</a>

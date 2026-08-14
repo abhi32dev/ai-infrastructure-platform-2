@@ -69,6 +69,61 @@
       <span class="path">REPLAY: RPOP(job) → RESTORE → LPUSH to main queue → [dispatched again] → TODLQ (same outcome)</span>
     </div>
 
+    <div class="section-head"><h2>What this project actually does &amp; architecture trade-offs</h2></div>
+    <div class="arch-grid">
+      <div class="arch-block does">
+        <h4>What it does</h4>
+        <ul>
+        <li>Decouples ingestion from processing via a real Redis queue — producers never block on consumer speed, proven by enqueueing 500 jobs against zero running workers with sub-millisecond enqueue latency.</li>
+        <li>Adaptively sizes the worker pool per dispatch cycle based on observed queue depth, via <code>max(MIN, min(MAX, depth // SCALE_DIVISOR + 1))</code>.</li>
+        <li>Routes permanently-failing jobs to a dead-letter queue after a bounded number of attempts, tracked via a Redis-backed per-job attempt counter that survives across dispatch cycles and worker restarts.</li>
+        </ul>
+      </div>
+      <div class="arch-block limits">
+        <h4>Known limitations</h4>
+        <ul>
+        <li>Single Redis instance — no discussion or implementation of Redis HA (Sentinel/Cluster), so the queue itself is a single point of failure.</li>
+        <li>Worker scaling formula is a simple linear function with hand-tuned constants, not derived from any load-testing methodology or feedback-controller (e.g. no PID-style correction for overshoot).</li>
+        <li>DLQ replay is manual/on-demand — no automatic periodic replay policy or alerting when the DLQ grows past a threshold.</li>
+        </ul>
+      </div>
+      <div class="arch-block tradeoffs">
+        <h4>Architectural trade-offs</h4>
+        <ul>
+        <li>A simple linear worker-scaling formula over a more sophisticated autoscaler (e.g. token-bucket or PID controller) — easy to reason about and test deterministically, at the cost of being less responsive to rapidly oscillating load.</li>
+        <li>Redis-backed attempt counters over in-memory ones — survives worker restarts and works across a multi-worker deployment, at the cost of one extra network round-trip per attempt check.</li>
+        <li>A dedicated DLQ over infinite retry — bounds wasted work on poisoned jobs, at the cost of needing an operational process (replay or manual triage) to actually recover from DLQ entries.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="section-head"><h2>Principal / Staff engineer interview questions</h2></div>
+    <div class="qa-card">
+      <span class="qa-level">Staff</span>
+      <h4>Your worker-scaling formula is `max(MIN, min(MAX, depth // SCALE_DIVISOR + 1))`. What's the actual failure mode of a formula this simple under bursty, oscillating load?</h4>
+      <p>A pure function of instantaneous depth has no memory — if load oscillates faster than one dispatch cycle, the formula will thrash between low and high worker counts, paying the overhead of spinning workers up and down repeatedly without ever settling. I'd add a smoothing term — an exponential moving average of recent depth readings feeding the formula instead of raw instantaneous depth — or a hysteresis band (don't scale down until depth has been low for N consecutive cycles) to damp oscillation, which is the same problem Kubernetes HPA solves with its stabilization window.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Principal</span>
+      <h4>You proved 500 enqueues complete in sub-millisecond time with zero consumers. What does that actually prove, and what does it NOT prove about this system's real-world backpressure behavior?</h4>
+      <p>It proves the <i>producer</i> never blocks on consumer availability — the architectural property backpressure decoupling is meant to guarantee. It does <b>not</b> prove the system behaves well when the queue itself becomes the bottleneck — e.g. Redis memory pressure under a truly unbounded burst (millions of jobs, not 500), or what happens to producer latency once Redis itself is saturated. A real capacity test needs to push past the point where Redis, not the workers, becomes the constraint, and verify there's a real backpressure signal (queue-depth-based admission control, or Redis eviction/OOM behavior) rather than assuming the queue absorbs infinite load.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Staff</span>
+      <h4>Walk through exactly why a job goes to the DLQ instead of being retried forever, and what's wrong with 'just retry forever' as a policy?</h4>
+      <p>Each failure increments a Redis-backed attempt counter (<code>INFLIGHT_HASH</code>); once <code>attempts >= MAX_ATTEMPTS</code>, the job routes to the DLQ instead of being re-enqueued. Retrying forever is wrong for two reasons: a genuinely poisoned job (malformed payload, a bug that always throws) wastes worker capacity indefinitely, starving healthy jobs of processing time; and it hides a real bug from operators — nothing ever surfaces as 'this needs a human' because the system just keeps quietly trying. A bounded retry with a DLQ turns an invisible infinite failure into a visible, actionable one.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Principal</span>
+      <h4>If this needs to handle 100x the current job volume, what's the first architectural piece that needs to change, and why?</h4>
+      <p>Single-Redis-instance queueing is the first thing to go — at 100x volume you need either Redis Cluster (sharded by job key) or a purpose-built queue (SQS, Kafka) with partition-level parallelism, because a single Redis instance has a hard ceiling on both memory and single-threaded command throughput. The worker-pool and DLQ logic largely stay conceptually the same — they'd just operate against a partitioned queue instead of one Redis list, with per-partition dispatch loops instead of one global one, to actually realize the parallelism the higher volume demands.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Staff</span>
+      <h4>Your attempt counter lives in Redis so it survives worker restarts. What's the actual race condition risk if two workers pick up retries of the same job concurrently, and does this design prevent it?</h4>
+      <p>As described, the attempt counter itself is safe from lost updates as long as its increment is atomic (Redis <code>HINCRBY</code> is), but that only protects the <i>counter</i> — it doesn't by itself prevent two workers from both dequeuing and processing the same job if the queue pop isn't atomic with respect to visibility. Redis's <code>LPOP</code> (or a proper visibility-timeout pattern like RPOPLPUSH) needs to guarantee only one worker ever sees a given job at a time; if that guarantee holds, the attempt counter is trustworthy, but it's worth explicitly stating that the safety property here rests on the queue primitive, not the counter alone.</p>
+    </div>
+
     <div class="footer-nav">
       <a href="index.html">← back to all flowcharts</a>
       <a href="https://github.com/abhi32dev/ai-infrastructure-platform-2/tree/main/06-backpressure-dispatch" target="_blank" rel="noopener">06-backpressure-dispatch source ↗</a>

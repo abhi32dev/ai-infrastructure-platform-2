@@ -64,6 +64,61 @@
       <span class="path">FLOOR(count=2 &lt; 20) → EXCLUDED  |  FLOOR(count=24 &gt;= 20) → INCLUDED</span>
     </div>
 
+    <div class="section-head"><h2>What this project actually does &amp; architecture trade-offs</h2></div>
+    <div class="arch-grid">
+      <div class="arch-block does">
+        <h4>What it does</h4>
+        <ul>
+        <li>Trains a matrix-factorization recommender from scratch via SGD — updating user/item bias terms and latent factor vectors per observed rating — and measurably reduces total squared error over 20 epochs.</li>
+        <li>Clips every prediction to the valid rating range (1-5) unconditionally, so even an untrained model with random weights returns a sane value.</li>
+        <li>Enforces a minimum-ratings floor (<code>MIN_RATINGS = 20</code>) in the separate popularity baseline, so a single 5-star review can never outrank a heavily-reviewed 4-star item.</li>
+        </ul>
+      </div>
+      <div class="arch-block limits">
+        <h4>Known limitations</h4>
+        <ul>
+        <li>Cold-start is unaddressed: a brand-new user or item with zero ratings has no learned latent factors and falls back to whatever the bias terms alone produce — no content-based or hybrid fallback is implemented.</li>
+        <li>SGD with fixed learning rate and no learning-rate schedule or early stopping — training for too many epochs risks overfitting on this small synthetic dataset, unmeasured here.</li>
+        <li>No implicit-feedback handling — the model only understands explicit ratings, not clicks/views/dwell-time, which is what most real recommender systems actually have abundant signal from.</li>
+        </ul>
+      </div>
+      <div class="arch-block tradeoffs">
+        <h4>Architectural trade-offs</h4>
+        <ul>
+        <li>A from-scratch SGD implementation over a library (e.g. Surprise, implicit) — chosen specifically so every update rule is visible and explainable, at the cost of missing production-grade optimizations (vectorized batch updates, bias regularization scheduling) a library would include.</li>
+        <li>A hard MIN_RATINGS floor over a Bayesian-average/shrinkage estimator for the popularity baseline — simpler to reason about and explain, at the cost of a discontinuous cutoff (19 ratings excluded, 20 included) versus a smooth confidence-weighted score.</li>
+        <li>Prediction clipping over training-time regularization to keep predictions in-range — a cheap, always-correct guarantee at inference time, independent of how well-trained or poorly-trained the model happens to be.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="section-head"><h2>Principal / Staff engineer interview questions</h2></div>
+    <div class="qa-card">
+      <span class="qa-level">Staff</span>
+      <h4>Walk through exactly what the SGD update does mathematically for one observed rating, and why it updates both bias terms and factor vectors rather than just the factors.</h4>
+      <p>For an observed rating, the model computes the prediction error (actual minus predicted), then nudges four things by <code>error × learning_rate</code> minus a regularization term: the user's bias, the item's bias, and both the user and item latent factor vectors. Bias terms capture systematic effects — a user who rates everything harshly, an item that's universally well-liked — that factor interactions alone can't cleanly represent; without them, the factor vectors would have to absorb both the interaction signal and these systematic offsets, making training slower to converge and the learned factors less interpretable.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Principal</span>
+      <h4>This model has no cold-start handling. In a real product, what's your actual strategy for a brand-new user with zero ratings, and why isn't 'just use the popularity baseline' a complete answer?</h4>
+      <p>Popularity baseline is a reasonable zero-shot default — it's literally what this project's separate baseline module is for — but it's the same recommendation for every new user, so it doesn't personalize at all until enough ratings accumulate. A better strategy layers: (1) popularity/trending as the true zero-signal fallback, (2) a short, low-friction onboarding flow that collects a handful of explicit preferences or uses any available side information (device, referral source, initial browse behavior) to warm-start a rough factor estimate, and (3) fast re-ranking as soon as the first few implicit signals (clicks, dwell time) arrive, rather than waiting for enough explicit ratings to retrain the full factorization.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Staff</span>
+      <h4>Your popularity baseline has a hard cutoff at 20 ratings. What's wrong with a hard cutoff, and what would a principled alternative look like?</h4>
+      <p>A hard cutoff creates a discontinuity — an item with 19 ratings averaging 4.9 is fully excluded, while one with 20 ratings averaging 3.0 is included, which doesn't match any real notion of 'we're confident this item is good'. The principled fix is a Bayesian-average (shrinkage) score: blend each item's raw average toward a global prior mean, weighted by how many ratings it has — <code>(C × prior_mean + n × item_mean) / (C + n)</code> — so confidence scales smoothly with sample size instead of stepping discontinuously at an arbitrary threshold, which is the actual formula IMDb's 'weighted rating' and similar production ranking systems use.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Principal</span>
+      <h4>How would you actually validate that this matrix-factorization model outperforms the simple popularity baseline, rather than just assuming a fancier model is better?</h4>
+      <p>Offline: hold out a slice of real ratings, and compare both models on a ranking metric that matches how recommendations are actually consumed — nDCG@k or precision@k on the held-out set, not just raw RMSE, since RMSE can look fine while the top-k ranking (what users actually see) is poor. Online: an A/B test measuring actual engagement (click-through, watch-time, purchase) between the two models in production — offline metrics are a necessary gate, not a substitute for the real signal, since offline metrics can favor a model that's technically more accurate but recommends less diverse or less serendipitous items than users actually respond to.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Staff</span>
+      <h4>The training loop measurably reduces total squared error over 20 epochs. What does that measurement NOT tell you about whether the model is actually good?</h4>
+      <p>It only proves the model fits the <i>training</i> data better over time — it says nothing about generalization. Without a held-out validation set tracked alongside training error, you can't tell whether epoch 20 is meaningfully better than epoch 10 on unseen ratings, or whether it's started overfitting (training error still falling while validation error rises). This project's own README is honest that this is a small synthetic dataset for demonstrating the SGD mechanics, not a rigorously validated recommender — the missing piece for real validation is exactly that held-out error curve, plus the ranking-metric evaluation from the previous answer.</p>
+    </div>
+
     <div class="footer-nav">
       <a href="index.html">← back to all flowcharts</a>
       <a href="https://github.com/abhi32dev/ai-infrastructure-platform-2/tree/main/08-recommender-system" target="_blank" rel="noopener">08-recommender-system source ↗</a>

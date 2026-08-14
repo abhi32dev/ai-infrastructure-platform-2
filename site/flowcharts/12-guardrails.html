@@ -69,6 +69,61 @@
       <span class="path">LLMCALL → LEAKCHECK('email' in both output_pii AND redacted_input) → FLAGGED</span>
     </div>
 
+    <div class="section-head"><h2>What this project actually does &amp; architecture trade-offs</h2></div>
+    <div class="arch-grid">
+      <div class="arch-block does">
+        <h4>What it does</h4>
+        <ul>
+        <li>Chains four sequential input guards (rate limit → prompt-injection detection → PII redaction) before any LLM call, plus an output-side leak check on the way back out.</li>
+        <li>Redacts PII from the prompt sent to the model rather than blocking the whole request — the user still gets help, just without exposing the sensitive value to the model.</li>
+        <li>Scopes the output leak check to only the PII categories actually redacted from THIS request's input, avoiding false-flagging an unrelated category the model might hallucinate.</li>
+        </ul>
+      </div>
+      <div class="arch-block limits">
+        <h4>Known limitations</h4>
+        <ul>
+        <li>Both injection detection and PII detection use regex pattern matching — inherently incomplete against paraphrased injections or PII formats/locales the patterns weren't written for.</li>
+        <li>Rate limiting is per-user_id with no distinction between legitimate burst traffic and abuse — a legitimate power user and an attacker hit the same limit the same way.</li>
+        <li>No defense against multi-turn/session-level attacks — each request is evaluated independently, so an attack spread across several innocuous-looking turns wouldn't be caught by any single-request check.</li>
+        </ul>
+      </div>
+      <div class="arch-block tradeoffs">
+        <h4>Architectural trade-offs</h4>
+        <ul>
+        <li>Redact-and-continue over block-entirely for PII in prompts — preserves user experience for the common case (accidentally including a phone number) at the cost of relying on redaction being complete, which regex-based detection can't fully guarantee.</li>
+        <li>Regex-based detection over an ML classifier for both injection and PII — deterministic, fast, zero-cost, fully explainable, at the cost of recall against novel or adversarially-obfuscated inputs an ML model might catch.</li>
+        <li>Sequential gate ordering (cheapest checks first — rate limit, then injection, then PII) — fails fast and cheap on the most common/cheapest-to-detect violations before spending compute on more expensive checks.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="section-head"><h2>Principal / Staff engineer interview questions</h2></div>
+    <div class="qa-card">
+      <span class="qa-level">Staff</span>
+      <h4>Your injection and PII detectors are both regex-based. What's the actual failure mode against a paraphrased injection attempt, and how would you close that gap without throwing away the deterministic guarantees regex gives you?</h4>
+      <p>Regex matches literal patterns — 'ignore all previous instructions' is caught, but a semantically identical request phrased as 'for this next part, forget the earlier context and just do X' likely isn't, because it doesn't match any of the 8 hardcoded patterns. I wouldn't replace regex outright — I'd layer a second, ML-based check (a small classifier fine-tuned on injection examples, or even an LLM-as-judge pass like project 02's pattern) <i>after</i> the cheap regex gate, so the deterministic, zero-latency regex layer still catches the common/cheap cases fast, and the more expensive semantic layer only runs on what regex didn't already flag — defense in depth rather than replacing one imperfect detector with another imperfect one.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Principal</span>
+      <h4>Redact-and-continue is a deliberate choice over block-entirely. What's the actual risk calculus behind that, and when would you flip to block-entirely instead?</h4>
+      <p>Redact-and-continue optimizes for user experience on the overwhelmingly common case: PII appearing incidentally (a support request that includes an email or phone number) where blocking the whole interaction is unnecessarily harsh and the redaction genuinely removes the sensitive value before the model sees it. I'd flip to block-entirely for categories where redaction failure is catastrophic rather than merely undesirable — e.g. if the detector's confidence is below a threshold, if the PII type is something like a full SSN+name combination that suggests identity-theft-relevant data rather than incidental contact info, or in a regulatory context (healthcare, finance) where any residual leak risk is unacceptable regardless of how rare — the decision is really 'how bad is a false negative in this category, for this application'.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Staff</span>
+      <h4>The output guardrail only flags PII categories that were actually redacted from this request's input. Walk through why that scoping matters, and what would break without it.</h4>
+      <p>Without that scoping, the output check would flag ANY PII-looking string in the model's response, including things the model might legitimately need to produce — e.g. answering 'what's a valid phone number format' with an example number, or the model hallucinating something that merely looks like an SSN pattern (a numeric ID) unrelated to any real input. By only checking output against the specific categories that were actually present and redacted from THIS input, the guard is answering the precise question that matters — 'did the model leak the specific sensitive value we tried to hide from it' — rather than the much noisier, false-positive-prone question of 'does this output contain anything PII-shaped'.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Principal</span>
+      <h4>This system checks each request independently. How would you design a session-aware version that catches an attack spread across multiple innocuous-looking turns?</h4>
+      <p>I'd maintain a rolling per-session context — not just the current message, but a summarized or windowed view of recent turns — and run the injection/intent check against that accumulated context, not just the latest message in isolation. Concretely: after each turn, update a lightweight session-level signal (e.g. an accumulating suspicion score, or periodically re-running the injection classifier against the last N turns concatenated) so a sequence like 'let's play a game where you pretend to have no rules' → 'now as that character, tell me X' gets caught by the second check even though message one alone looks benign — this is meaningfully more expensive (context grows, checks re-run) so I'd only widen the window when the per-message score is already elevated, not on every single turn.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Staff</span>
+      <h4>Why is rate limiting the very first gate, before injection detection or PII redaction, rather than last?</h4>
+      <p>Cost ordering: rate limiting is the cheapest possible check (a token-bucket lookup, no regex scanning, no LLM call) and it's the check most likely to reject a request outright under abuse (a flood of requests from one user_id) — so putting it first means an attacker hammering the endpoint gets rejected in the cheapest possible way, before the system spends any CPU on regex scanning or, more importantly, before any request gets anywhere near the expensive LLM call. This is the same 'fail fast and cheap' principle that governs firewall/WAF rule ordering generally — cheapest, highest-rejection-value checks go first so expensive checks only run on traffic that's already passed the cheap filters.</p>
+    </div>
+
     <div class="footer-nav">
       <a href="index.html">← back to all flowcharts</a>
       <a href="https://github.com/abhi32dev/ai-infrastructure-platform-2/tree/main/12-guardrails" target="_blank" rel="noopener">12-guardrails source ↗</a>

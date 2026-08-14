@@ -64,6 +64,61 @@
       <span class="path">[BROKEN]: RESTARTCALL(session A, mutates A) → RECHECKCALL(session B, fresh) → still unhealthy — FIXED by reusing one session</span>
     </div>
 
+    <div class="section-head"><h2>What this project actually does &amp; architecture trade-offs</h2></div>
+    <div class="arch-grid">
+      <div class="arch-block does">
+        <h4>What it does</h4>
+        <ul>
+        <li>Implements a real MCP (Model Context Protocol) coordinator-to-specialist delegation: the coordinator exposes exactly one tool externally but internally acts as an MCP client of a second server for multiple sub-calls.</li>
+        <li>Found and fixed a real state-persistence bug: reusing one MCP session across a multi-step remediation flow, instead of opening a fresh session per call, which was silently resetting the specialist's in-memory state between steps.</li>
+        <li>Implements a substring-based health check that gates whether the expensive remediation path (restart + search + re-check) runs at all.</li>
+        </ul>
+      </div>
+      <div class="arch-block limits">
+        <h4>Known limitations</h4>
+        <ul>
+        <li>The specialist's state (<code>_INSTANCES</code>) lives entirely in-process memory — a specialist server restart loses all fleet state, with no persistence layer.</li>
+        <li>Health/incident matching uses simple substring checks, not a structured schema or confidence score — brittle to phrasing changes in either the health response or the incident log.</li>
+        <li>No timeout or circuit-breaking around the coordinator-to-specialist MCP calls — a hung specialist server would hang the entire coordinator invocation.</li>
+        </ul>
+      </div>
+      <div class="arch-block tradeoffs">
+        <h4>Architectural trade-offs</h4>
+        <ul>
+        <li>One long-lived MCP session per invocation over a fresh session per sub-call — necessary for correctness (state has to persist across the restart→search→recheck sequence), at the cost of the coordinator needing to manage session lifecycle explicitly rather than treating each call as fully stateless.</li>
+        <li>In-process specialist state over a persisted store — trivial to set up and reason about for the demo, at the cost of zero durability across specialist restarts, which a real fleet-management tool would need.</li>
+        <li>Substring matching over structured/typed responses between agents — fast to build and demonstrate, at the cost of fragility that a real multi-agent system would need to harden with a proper schema.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="section-head"><h2>Principal / Staff engineer interview questions</h2></div>
+    <div class="qa-card">
+      <span class="qa-level">Staff</span>
+      <h4>Walk through the exact mechanism of the session-reuse bug you found — why does opening a fresh MCP session per call break state that a single session preserves?</h4>
+      <p>The specialist server holds fleet state (<code>_INSTANCES</code>) in the memory of whatever process is running it. Each fresh <code>stdio_client</code> session in the original buggy version spawned (or connected to) what was effectively treated as an independent specialist invocation for that call — so <code>restart_instance()</code>'s mutation happened in one session's specialist-side state, and the following <code>search_incident_log()</code> and re-check calls, made under new sessions, saw a specialist that never observed that mutation. The fix — one persistent session opened once and reused for all four sub-calls in the invocation — means every sub-call talks to the exact same specialist-side process and memory, so a mutation in step 2 is visible in step 4.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Principal</span>
+      <h4>This is a two-agent system. What's your actual strategy for scaling this pattern to N specialist agents behind one coordinator, and where does the current single-session design break?</h4>
+      <p>The current pattern — one coordinator session per specialist, held open for the invocation's duration — generalizes fine to N specialists as long as each specialist's session is independently managed (the coordinator would hold N open sessions concurrently, not reuse one session across different specialists). Where it breaks is coordination logic complexity: with N specialists, the coordinator needs to reason about partial failures (3 of 5 specialists responded, 2 timed out), potential ordering dependencies between specialist calls, and aggregating heterogeneous responses — none of which this two-agent demo needs to solve, but which is exactly the hard part of real multi-agent orchestration at that scale.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Staff</span>
+      <h4>The health check is a substring match (`'unhealthy' in health_response`). What's the actual risk of that design, and how would you harden it for a real production fleet tool?</h4>
+      <p>Substring matching is fragile to any phrasing change in either direction — if the specialist ever rephrases its response (e.g. 'not healthy' instead of 'unhealthy', or includes the word 'unhealthy' inside an unrelated sentence like 'previously unhealthy, now recovered'), the coordinator's logic silently breaks or misfires. I'd replace free-text health responses with a structured, typed response (a JSON object with an explicit <code>status: healthy | unhealthy | unknown</code> enum field) — MCP tool responses can and should carry structured data, not just prose, specifically so downstream logic like this health-gate doesn't have to parse natural language to make a control-flow decision.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Principal</span>
+      <h4>If the specialist server's process crashes mid-invocation — say between restart_instance() and the re-check — what actually happens in this system, and what SHOULD happen in a production version?</h4>
+      <p>As built, the coordinator's session to that specialist would fail on the next call (a broken pipe / connection error from the stdio transport), and there's no retry, reconnection, or partial-state recovery logic — the invocation just fails, and because specialist state is in-memory only, any progress (the restart that already happened) is invisible to a fresh specialist process on reconnect. A production version needs: specialist-side state persistence (so a restart doesn't lose fleet state), coordinator-side retry with idempotency awareness (don't re-restart an instance that already restarted, blindly), and a clear partial-failure signal back to whatever called the coordinator, rather than a bare connection exception.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Staff</span>
+      <h4>Why does the coordinator expose exactly one tool externally while internally making four sub-calls to the specialist? What design principle is that enforcing?</h4>
+      <p>It's an encapsulation boundary — the caller of the coordinator's exposed tool shouldn't need to know that remediation internally involves a health check, a conditional restart, an incident search, and a re-check; they should be able to ask for 'diagnose and remediate this fleet issue' and get a result. This mirrors good API design generally: the coordinator's one exposed tool is the stable, meaningful contract, while the specialist's four granular tools are implementation detail that can be refactored (reordered, made conditional, replaced) without breaking anyone calling the coordinator — exactly the same reasoning that motivates hiding internal microservice calls behind a single external API gateway endpoint.</p>
+    </div>
+
     <div class="footer-nav">
       <a href="index.html">← back to all flowcharts</a>
       <a href="https://github.com/abhi32dev/ai-infrastructure-platform-2/tree/main/11-mcp-agent-protocol" target="_blank" rel="noopener">11-mcp-agent-protocol source ↗</a>

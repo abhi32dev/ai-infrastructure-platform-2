@@ -64,6 +64,61 @@
       <span class="path">TOOPEN → [5s pass] → TIMEPASS(True) → TOHALFOPEN → PROBERESULT(succeeds) → RECORDSUCCESS → CLOSED</span>
     </div>
 
+    <div class="section-head"><h2>What this project actually does &amp; architecture trade-offs</h2></div>
+    <div class="arch-grid">
+      <div class="arch-block does">
+        <h4>What it does</h4>
+        <ul>
+        <li>Implements a real 3-state circuit breaker (CLOSED → OPEN → HALF_OPEN → CLOSED) in front of a local Ollama model, tested against the actual failure/recovery behavior of a real process, not a mock.</li>
+        <li>Fast-fails in 0.001s when the circuit is OPEN, instead of waiting out a 30-second network timeout on every request during a known outage.</li>
+        <li>Computes the OPEN → HALF_OPEN transition lazily from a timestamp comparison on every state read, rather than via a background timer thread.</li>
+        </ul>
+      </div>
+      <div class="arch-block limits">
+        <h4>Known limitations</h4>
+        <ul>
+        <li>Single breaker instance in a single process — no shared circuit state across multiple server replicas, so each replica independently discovers the same outage rather than sharing that knowledge.</li>
+        <li>HALF_OPEN allows exactly one probe request; if that lone probe happens to succeed by chance during a genuinely flaky (not fully down) dependency, the breaker fully resets and immediately re-exposes callers to the flakiness.</li>
+        <li>The failure/success thresholds (3 failures to open, cooldown duration) are fixed constants, not adaptively tuned to the actual observed latency/error distribution of the downstream.</li>
+        </ul>
+      </div>
+      <div class="arch-block tradeoffs">
+        <h4>Architectural trade-offs</h4>
+        <ul>
+        <li>A lazy, read-time state computation (checking elapsed time on every `.state` access) over a background timer/thread — avoids needing to manage thread lifecycle and race conditions, at the cost of a state check needing to be paired with an actual read to trigger the transition.</li>
+        <li>A single probe request in HALF_OPEN over multiple probes before fully closing — faster recovery for genuinely-healthy dependencies, at the cost of being more easily fooled by a lucky single success during real flakiness.</li>
+        <li>In-process breaker state over an external shared store (Redis) for breaker state — zero extra infra for a single-instance demo, at the cost of not generalizing to a multi-replica deployment without redesign.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="section-head"><h2>Principal / Staff engineer interview questions</h2></div>
+    <div class="qa-card">
+      <span class="qa-level">Staff</span>
+      <h4>Walk through exactly how the OPEN to HALF_OPEN transition is detected, given there's no background timer. What's the actual risk of this lazy approach?</h4>
+      <p>The breaker stores <code>_opened_at</code> when it trips OPEN; the <code>.state</code> property computes, on every access, whether <code>now() - _opened_at >= cooldown_seconds</code>, and reports HALF_OPEN once true — no timer thread ever fires on its own. The risk: if nothing reads <code>.state</code> for a while (e.g. the service is receiving zero traffic during the outage), the transition is 'computed' but never actually observed or acted on until the next real request arrives — which is actually fine for this breaker's purpose (there's nothing useful to do with the transition until a request needs routing), but it's the exact root cause of the HALF_OPEN gap documented in project 16: a Kubernetes health check reading that lazy state without generating real traffic can see a stale HALF_OPEN-then-CLOSED transition that doesn't reflect the dependency's actual current health.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Principal</span>
+      <h4>This breaker's state is process-local. At 10 replicas behind a load balancer, what's wrong with that, and how would you fix it?</h4>
+      <p>Each replica independently detects the same outage and independently pays the 3-failure cost of discovering it — with 10 replicas, that's 30 wasted requests against a known-dead dependency before all of them have tripped, versus 3 if they shared state. I'd move breaker state to a shared store (Redis, with the failure counter and open/half-open state as keys with TTLs matching the cooldown) so one replica's trip is immediately visible to all others — the trade-off is now every state check is a network call instead of an in-process read, so you'd want to cache reads locally with a short TTL to avoid turning the breaker itself into a latency/availability liability.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Staff</span>
+      <h4>The HALF_OPEN state allows exactly one probe. What's the actual statistical problem with that under a truly flaky (not fully down, not fully up) dependency, and how would you improve it?</h4>
+      <p>One probe is a single Bernoulli trial — if the dependency is succeeding 50% of the time, there's a 50% chance the single probe happens to succeed, fully resetting the breaker back to CLOSED and re-exposing every subsequent caller to the other 50% failure rate until 3 more failures accumulate. A better design allows a small number of probes in HALF_OPEN (say 3-5) and requires a majority or all to succeed before fully closing, which is closer to what production circuit breaker libraries (e.g. resilience4j) actually implement — trading slightly slower recovery-confirmation for much better robustness against exactly this partial-failure case.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Principal</span>
+      <h4>You proved this against a real Ollama process, not a mock. Why does that distinction matter for a project like this, and what's the risk of only testing circuit breakers against mocks?</h4>
+      <p>A mock only tests that your code calls the right methods in the right order under failure conditions you've hand-specified — it can't reveal timing bugs (does the breaker actually observe wall-clock cooldown correctly under real scheduling jitter), or the actual failure signature of the real dependency (does it fail with a clean exception, a hang, a partial response — mocks tend to only simulate the failure mode you thought to write). Testing against a real, genuinely-stoppable Ollama process meant the 3-failures-then-fast-fail and the cooldown-then-recovery behaviors were validated against real process-kill and real elapsed wall-clock time, which is the actual thing the breaker needs to get right in production, not just a simulation of it.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Staff</span>
+      <h4>How would you decide the right values for failure_threshold and cooldown_seconds for a new downstream dependency, rather than picking them by intuition?</h4>
+      <p>I'd look at the dependency's own observed latency/error distribution — specifically, how long a typical transient blip lasts (informs cooldown: it should be at least that long, so probes aren't wasted during an outage that's still resolving) and how distinguishable a real outage is from normal error-rate noise (informs failure_threshold: too low trips on noise, too high delays real protection). In practice I'd start conservative, instrument the breaker's own trip/reset events as metrics, and tune both constants based on observed false-trip rate versus observed time-to-detect-real-outage from production data, rather than hand-picking the 3-failures/30-seconds this project uses for its demo.</p>
+    </div>
+
     <div class="footer-nav">
       <a href="index.html">← back to all flowcharts</a>
       <a href="https://github.com/abhi32dev/ai-infrastructure-platform-2/tree/main/09-local-model-serving" target="_blank" rel="noopener">09-local-model-serving source ↗</a>

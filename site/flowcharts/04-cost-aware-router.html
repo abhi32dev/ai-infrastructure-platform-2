@@ -64,6 +64,61 @@
       <span class="path">SLOOP1(1000) → SLOOP2(4) → KEYWORDCHECK(4/4 hit) → BEST</span>
     </div>
 
+    <div class="section-head"><h2>What this project actually does &amp; architecture trade-offs</h2></div>
+    <div class="arch-grid">
+      <div class="arch-block does">
+        <h4>What it does</h4>
+        <ul>
+        <li>Classifies every incoming query as SIMPLE or COMPLEX using a small model, then routes SIMPLE queries to a cheap model and everything else to a larger one.</li>
+        <li>Fails safe: any classification ambiguity (unparsable JSON, an unrecognized tier value) routes to the more expensive, more capable model rather than risking a wrong answer from the cheap one.</li>
+        <li>Separately sweeps chunk_size × k combinations to find the cost/quality frontier for retrieval, using a deterministic keyword-match quality proxy instead of an LLM judge.</li>
+        </ul>
+      </div>
+      <div class="arch-block limits">
+        <h4>Known limitations</h4>
+        <ul>
+        <li>The classifier is itself an LLM call — it has its own latency and cost, and its own error rate, which isn't independently measured against ground truth in this project.</li>
+        <li>The SIMPLE/COMPLEX binary is coarse; a real production router would likely need a continuous complexity/cost estimate rather than a hard two-way split.</li>
+        <li>The chunk-size sweep's keyword-match proxy is a cheap stand-in for real relevance — it can pass a chunk that contains the keyword but not the right meaning, or fail one that's semantically right but phrased differently.</li>
+        </ul>
+      </div>
+      <div class="arch-block tradeoffs">
+        <h4>Architectural trade-offs</h4>
+        <ul>
+        <li>Fail-safe-to-expensive on classifier ambiguity over fail-safe-to-cheap — a wrong-but-cheap answer on a hard query was judged worse than an unnecessary few cents on an easy one.</li>
+        <li>A separate small-model classification call over embedding the routing decision into the main generation call — adds one extra round-trip of latency, but keeps the routing logic swappable/testable independent of the answering model.</li>
+        <li>Deterministic keyword-match quality proxy over an LLM-judged relevance score for the chunk sweep — removes judge-model variance from a parameter search that needs to run many times, at the cost of proxy fidelity.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="section-head"><h2>Principal / Staff engineer interview questions</h2></div>
+    <div class="qa-card">
+      <span class="qa-level">Staff</span>
+      <h4>Your classifier can itself be wrong — what's the actual cost model here, and how would you validate the router is net-saving money rather than just shifting cost around?</h4>
+      <p>You need three numbers measured against a labeled query set: the classifier's own accuracy (how often SIMPLE/COMPLEX matches ground truth), the cost delta between routing tiers, and the quality delta of answering a genuinely-complex query with the cheap model on a misclassification. Net savings = (fraction correctly routed SIMPLE × cost saved) − (fraction misclassified SIMPLE × cost of wrong answers, e.g. re-asks or downstream errors). This project doesn't currently compute that last term — it's the missing piece before I'd trust the routing math in production.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Principal</span>
+      <h4>Why fail-safe to the expensive model on classifier ambiguity rather than, say, a third 'MEDIUM' tier or a confidence-weighted blend?</h4>
+      <p>A third tier adds a whole new branch to validate and a new cost point to model, for a case (classifier ambiguity) that should be rare by design — if it's not rare, the classifier itself needs fixing, not a bigger routing table. A confidence-weighted blend is technically elegant but non-deterministic in a way that makes cost budgeting harder to reason about and debug. The two-tier fail-safe is deliberately the simplest design that has the right safety property (never silently give a cheap-and-possibly-wrong answer); I'd only add complexity here once I had evidence the simple version was actually leaving savings on the table.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Staff</span>
+      <h4>The chunk-size sweep uses a keyword-match proxy instead of an LLM judge. At what scale does that decision stop being defensible, and what would you replace it with?</h4>
+      <p>It's defensible for a parameter sweep across a handful of chunk_size × k combinations against a small, hand-curated eval set — cheap, fast, deterministic, good enough to find the right ballpark. It stops being defensible once you're tuning against a large, diverse query set where keyword presence stops correlating with actual relevance (paraphrases, multi-hop questions). At that point I'd switch to a held-out human-labeled relevance set with a proper IR metric (nDCG or MRR), and reserve LLM-judged relevance for the final validation pass rather than the inner sweep loop, since judge cost/variance would dominate a sweep run many times.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Principal</span>
+      <h4>How would you extend this single-hop router into a multi-model cascade — say 3-4 tiers of increasing capability/cost — without the classification error compounding at each hop?</h4>
+      <p>I'd avoid re-classifying at every hop (each classification is a chance to misroute) and instead do one upfront complexity estimate that directly maps to a tier, plus an escalation path based on the <i>answering</i> model's own confidence or a lightweight verifier check — e.g. cheap model answers, a fast heuristic or small verifier checks the answer, and only escalates to the next tier if that check fails. This shifts the routing signal from 'how hard does this look upfront' (error-prone, single classifier) to 'did the cheap attempt actually work' (grounded in the real output), which compounds much less across tiers.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Staff</span>
+      <h4>What's the single biggest thing missing before this router could run in front of real production traffic?</h4>
+      <p>Online measurement and a feedback loop — right now cost/quality trade-offs are validated offline against a static eval set, but production query distributions drift. I'd add live sampling of a fraction of SIMPLE-routed queries to also run through the COMPLEX model in shadow mode, comparing outputs to catch classifier drift or a shifting query mix before it becomes a systemic quality regression, plus dashboards on the SIMPLE/COMPLEX split ratio over time as an early warning signal.</p>
+    </div>
+
     <div class="footer-nav">
       <a href="index.html">← back to all flowcharts</a>
       <a href="https://github.com/abhi32dev/ai-infrastructure-platform-2/tree/main/04-cost-aware-router" target="_blank" rel="noopener">04-cost-aware-router source ↗</a>

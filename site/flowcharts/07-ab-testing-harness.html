@@ -65,6 +65,61 @@
       <span class="path">TTEST → TCALC(nan) → EDGECASE(Yes) → NANSAFE</span>
     </div>
 
+    <div class="section-head"><h2>What this project actually does &amp; architecture trade-offs</h2></div>
+    <div class="arch-grid">
+      <div class="arch-block does">
+        <h4>What it does</h4>
+        <ul>
+        <li>Implements two real statistical tests from scratch semantics — a two-proportion z-test for binary outcomes, and Welch's t-test for continuous measurements — with an explicit <code>bool(p_value < 0.05)</code> significance decision.</li>
+        <li>Recovers a real, seeded 7.4% relative lift from 50,000 simulated users per arm, proving the z-test correctly detects a true effect at scale.</li>
+        <li>Correctly refuses to call a dramatic-looking 56% latency difference significant when it's really outlier-driven noise from a tiny (n=8) sample.</li>
+        </ul>
+      </div>
+      <div class="arch-block limits">
+        <h4>Known limitations</h4>
+        <ul>
+        <li>Fixed significance threshold (0.05) with no multiple-testing correction — running many simultaneous A/B tests with this harness would inflate the false-positive rate without a Bonferroni/FDR adjustment.</li>
+        <li>No sequential testing support — a real experimentation platform needs to handle 'peeking' at results before the planned sample size is reached without inflating false positives, which this harness doesn't address.</li>
+        <li>No effect-size/practical-significance reporting alongside statistical significance — a p<0.05 result with a trivially small effect size would still be flagged 'significant' here.</li>
+        </ul>
+      </div>
+      <div class="arch-block tradeoffs">
+        <h4>Architectural trade-offs</h4>
+        <ul>
+        <li>A fixed 0.05 threshold and one-shot testing over sequential/Bayesian testing — simpler to implement and explain, at the cost of the 'peeking' problem and no early-stopping efficiency.</li>
+        <li>Welch's t-test (unequal variance assumed) over Student's t-test — more robust to the common real-world case of two arms with genuinely different variances, at a small cost in statistical power when variances actually are equal.</li>
+        <li>An explicit <code>bool()</code> wrap on the significance check over trusting numpy's boolean type directly — a real bug (a numpy bool failing an <code>is True</code> check in a test) forced this, prioritizing test-suite correctness over what looked like unnecessary defensive code.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="section-head"><h2>Principal / Staff engineer interview questions</h2></div>
+    <div class="qa-card">
+      <span class="qa-level">Staff</span>
+      <h4>You found a real bug where a numpy bool failed an `is True` check. Walk through exactly why that happens and why the fix is `bool()` rather than fixing the test.</h4>
+      <p><code>numpy.bool_</code> (what comparisons on numpy arrays/scalars return) is a distinct type from Python's built-in <code>bool</code> — <code>np.True_ == True</code> is True, but <code>np.True_ is True</code> is False, because <code>is</code> checks object identity, not equality, and numpy's boolean is a different singleton than Python's. The right fix is at the boundary where the function's public contract is defined — explicitly casting to Python <code>bool()</code> before returning — because callers (including test code) reasonably expect a public API's boolean return value to behave like a normal Python bool, including under identity checks; patching the test to use <code>==</code> instead just hides the type leak rather than fixing it.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Principal</span>
+      <h4>You have no multiple-testing correction. If a team runs 20 simultaneous experiments through this harness, what's the actual mathematical consequence, and how would you fix it?</h4>
+      <p>With no correction, each test's 5% false-positive rate compounds independently — the probability that <i>at least one</i> of 20 truly-null experiments shows a false 'significant' result is roughly 1 − 0.95^20 ≈ 64%, not 5%. I'd add a correction layer over the existing per-test p-values: Bonferroni (divide alpha by the number of concurrent tests) for a conservative, simple fix, or Benjamini-Hochberg FDR control if the team runs many tests routinely and can tolerate a controlled false-discovery rate rather than a strict family-wise error rate — the choice depends on whether false positives or reduced power is the more expensive mistake for that team.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Staff</span>
+      <h4>Your Welch's t-test example correctly refuses to call an 8-sample, outlier-driven 56% difference significant. What would you tell a PM who says 'but the number is right there, 56% faster' and pushes to ship anyway?</h4>
+      <p>I'd show them the actual data: one cold-start outlier is dominating both arms' means at n=8, and the confidence interval on the difference is wide enough to include zero — meaning the true effect could be anywhere from a real win to a real loss, and this sample simply can't tell them which. The right response isn't 'ignore the number', it's 'the sample size is too small to trust this number' — I'd recommend collecting enough additional samples to shrink the CI to a decision-useful width (a power analysis can give the exact n needed) before making a ship/no-ship call on the metric.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Principal</span>
+      <h4>How would you redesign this harness to support sequential testing — stopping early when a result is clearly significant, without inflating the false-positive rate the naive way people usually get this wrong?</h4>
+      <p>Naive early-stopping (check p-value after every batch, stop as soon as p<0.05) inflates false positives because you're effectively running many correlated tests and taking the best result — the 'peeking problem'. I'd implement a proper sequential testing method — either a Sequential Probability Ratio Test (SPRT) with pre-specified error-rate bounds, or an always-valid p-value / confidence sequence approach (e.g. what Optimizely and other real experimentation platforms use) — which is specifically designed so that checking the result at any time, including continuously, doesn't inflate the overall false-positive rate the way naive repeated significance testing does.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Staff</span>
+      <h4>The z-test pools both arms' successes to compute standard error. What assumption does that rely on, and when would it give you a wrong answer?</h4>
+      <p>Pooling assumes the null hypothesis is true when computing the standard error (i.e. it estimates variance under 'both arms have the same true rate'), which is the standard, correct approach specifically for testing whether two proportions differ — it's what makes it a valid hypothesis test rather than just a confidence-interval comparison. It would give a misleading answer if you used the <i>pooled</i> standard error to also construct a confidence interval on the <i>difference</i> between the two rates (rather than just the significance test) — for that you'd want the unpooled standard error, since you're no longer assuming the null is true, you're trying to estimate the actual size of a possibly-nonzero difference.</p>
+    </div>
+
     <div class="footer-nav">
       <a href="index.html">← back to all flowcharts</a>
       <a href="https://github.com/abhi32dev/ai-infrastructure-platform-2/tree/main/07-ab-testing-harness" target="_blank" rel="noopener">07-ab-testing-harness source ↗</a>

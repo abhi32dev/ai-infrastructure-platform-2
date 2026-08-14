@@ -64,6 +64,61 @@
       <span class="path">LOOKUP → SCANLOOP → COSINE(0.567) → THRESHCHECK(No) → RETURNNONE2 → MISSFLOW → CALLLLM</span>
     </div>
 
+    <div class="section-head"><h2>What this project actually does &amp; architecture trade-offs</h2></div>
+    <div class="arch-grid">
+      <div class="arch-block does">
+        <h4>What it does</h4>
+        <ul>
+        <li>Implements a semantic cache that embeds every query and linearly scans prior cached entries for the best cosine-similarity match, calibrated to a real, measured threshold (0.75) rather than a guessed one.</li>
+        <li>Documents a real calibration failure: an initial guessed threshold of 0.92 produced zero cache hits when tested against actual paraphrase pairs, which is why 0.75 was measured and substituted instead.</li>
+        <li>Correctly distinguishes a close paraphrase (0.790 similarity, hits) from a looser paraphrase (0.567 similarity, correctly misses) using the same calibrated threshold.</li>
+        </ul>
+      </div>
+      <div class="arch-block limits">
+        <h4>Known limitations</h4>
+        <ul>
+        <li>Linear scan over all cached entries — fine at demo scale (tens of entries), but doesn't scale to a production cache with thousands or millions of entries without an ANN index (e.g. HNSW) instead of brute-force cosine similarity.</li>
+        <li>Cache grows unboundedly across a session — no eviction policy (LRU, TTL, or size cap) is implemented, a documented known limitation rather than a hidden one.</li>
+        <li>A single global similarity threshold applied to all queries — no per-domain or per-query-type threshold tuning, even though the right threshold likely varies by how paraphrase-prone different query categories are.</li>
+        </ul>
+      </div>
+      <div class="arch-block tradeoffs">
+        <h4>Architectural trade-offs</h4>
+        <ul>
+        <li>A measured, calibrated threshold over an intuition-based guess — the guessed 0.92 threshold looked reasonable but was empirically wrong (zero hits); this project explicitly prioritizes measurement over intuition, documenting the wrong guess rather than hiding it.</li>
+        <li>Linear scan over an ANN index for the cache lookup — trivially correct and simple to reason about at this scale, at the cost of not being the architecture you'd actually deploy once the cache holds more than a few thousand entries.</li>
+        <li>No eviction policy over adding one prematurely — an unbounded cache is honestly documented as a known limitation rather than adding untested eviction logic just to appear complete.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="section-head"><h2>Principal / Staff engineer interview questions</h2></div>
+    <div class="qa-card">
+      <span class="qa-level">Staff</span>
+      <h4>You found the guessed 0.92 threshold produced zero hits, then measured 0.75. Walk through exactly how you'd calibrate a similarity threshold properly, not just by 'trying numbers until it works'.</h4>
+      <p>The right method: collect a labeled set of genuine paraphrase pairs (queries you know SHOULD hit the same cache entry) and genuine non-paraphrase pairs (queries that should NOT), compute cosine similarity for both sets, and look at the actual score distributions — the right threshold sits in the gap between the non-paraphrase distribution's upper tail and the paraphrase distribution's lower tail. In this project, measuring real paraphrase pairs directly (rather than assuming embedding-space intuition would transfer) is exactly what revealed 0.92 was calibrated for a different notion of 'similar' than what these specific paraphrases actually scored — the lesson generalizes: any embedding-similarity threshold needs to be measured against real examples of the thing you're trying to detect, not assumed from general embedding-space intuition.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Principal</span>
+      <h4>This cache does a linear scan. At what cache size does that become a real production problem, and what would you replace it with?</h4>
+      <p>Linear scan cost grows directly with cache size — at tens of entries it's sub-millisecond and irrelevant; somewhere in the thousands-to-tens-of-thousands range, depending on embedding dimensionality and query rate, the per-lookup cost starts competing with the latency savings the cache is supposed to provide in the first place, which would be a real problem to actually measure rather than assume. I'd replace brute-force scan with an approximate nearest-neighbor index (HNSW via FAISS or a vector DB like the Chroma index project 01 already uses) once that crossover point is reached — the trade-off is ANN search is approximate (might occasionally miss the true nearest neighbor) versus linear scan's exact guarantee, which for a cache lookup (where a near-miss just means a cache miss, not a wrong answer) is an acceptable trade for the latency win.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Staff</span>
+      <h4>There's no eviction policy — the cache grows unboundedly. What's the actual failure mode in a long-running production service, and what eviction strategy would you add first?</h4>
+      <p>Unbounded growth means memory usage climbs indefinitely for the life of the process, eventually leading to OOM or (worse) gradually degrading lookup latency as the linear scan gets slower with every new entry — a slow-motion failure that's easy to miss until it's acute. I'd add a simple LRU eviction with a fixed max-size cap first — it's the lowest-effort fix that bounds memory and keeps lookup cost bounded, and it aligns well with cache access patterns (recently-used queries are more likely to be asked again) — a TTL-based expiry would be a reasonable addition on top if the underlying knowledge base changes over time and stale cached answers become a correctness risk, not just a memory risk.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Principal</span>
+      <h4>How would you actually measure whether this semantic cache is worth its complexity in production, versus just being extra risk for marginal savings?</h4>
+      <p>I'd track three things in production: hit rate (what fraction of queries actually get served from cache), the cost/latency saved per hit (LLM call cost/latency avoided), and — critically — the false-hit rate, meaning cases where a cache hit served an answer that was actually wrong for the new query despite passing the similarity threshold, which requires either sampled human review or a secondary faithfulness check on cache hits. Net value is (hit rate × savings per hit) minus (false-hit rate × cost of a wrong cached answer, which could be much higher than a normal wrong answer since it's silently served with high apparent confidence) minus the cache's own operational cost — a semantic cache that has a nonzero false-hit rate on ambiguous paraphrases needs that risk explicitly measured, not assumed away.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Staff</span>
+      <h4>Why does the cache store embeddings and compare via cosine similarity instead of, say, exact string matching or a simpler fuzzy-string similarity?</h4>
+      <p>Exact string matching only catches byte-identical repeats — it would completely miss 'What happens when an EC2 receiver fails health checks?' matching 'When an instance fails its health check, what happens automatically?', which is the entire value proposition of a semantic cache over a naive one. Fuzzy string similarity (edit distance, token overlap) does somewhat better but still operates on surface text, not meaning — it would likely miss that pair too, since the wording differs substantially even though the meaning is close. Embedding-based cosine similarity captures semantic closeness independent of surface phrasing, which is precisely what's needed to catch genuine paraphrases — the trade-off is needing to compute and compare embeddings (extra compute per lookup) versus a cheap string comparison, which is exactly the cost the calibrated threshold is trying to spend wisely.</p>
+    </div>
+
     <div class="footer-nav">
       <a href="index.html">← back to all flowcharts</a>
       <a href="https://github.com/abhi32dev/ai-infrastructure-platform-2/tree/main/14-cost-optimization" target="_blank" rel="noopener">14-cost-optimization source ↗</a>

@@ -64,6 +64,61 @@
       <span class="path">GENFN → LLMINVOKE(raises) → EXCEPT(Yes) → SPANERR → FINALLY → exception re-raised</span>
     </div>
 
+    <div class="section-head"><h2>What this project actually does &amp; architecture trade-offs</h2></div>
+    <div class="arch-grid">
+      <div class="arch-block does">
+        <h4>What it does</h4>
+        <ul>
+        <li>Instruments a RAG pipeline with real OpenTelemetry spans (parent span plus three nested child spans: retrieval, context_assembly, generation) and Prometheus counters at deliberate points.</li>
+        <li>Implements a graceful degrade-not-crash fallback: a query with zero keyword overlap against the entire corpus still returns the single highest-scoring entry rather than an empty result.</li>
+        <li>Guarantees telemetry completeness under failure via try/except/finally: an exception marks the span ERROR and increments an error counter before re-raising, and latency is always recorded regardless of outcome.</li>
+        </ul>
+      </div>
+      <div class="arch-block limits">
+        <h4>Known limitations</h4>
+        <ul>
+        <li>No sampling strategy — every single request is fully traced, which is fine at demo scale but would need head- or tail-based sampling at real production volume to control tracing overhead and storage cost.</li>
+        <li>Metrics are Prometheus counters/histograms exposed for scraping, but there's no actual alerting layer (Alertmanager rules, SLO burn-rate alerts) built on top of them in this project.</li>
+        <li>The retrieval fallback (highest-scoring entry even at score=0) can silently feed irrelevant context into generation — it prevents a crash, but doesn't itself prevent a low-quality or wrong answer.</li>
+        </ul>
+      </div>
+      <div class="arch-block tradeoffs">
+        <h4>Architectural trade-offs</h4>
+        <ul>
+        <li>Nested child spans (retrieval, context_assembly, generation) inside one parent span over separate top-level traces per stage — preserves the causal/timing relationship between stages in one queryable trace, at the cost of the trace growing larger per request.</li>
+        <li>try/except/finally around the whole pipeline over per-stage error handling — guarantees telemetry completeness with one code path to reason about, at the cost of coarser-grained error attribution (you know the pipeline failed, and roughly where via span status, but not always the precise root cause without reading further).</li>
+        <li>A deterministic fallback (best-available match) over returning an explicit empty/error result on zero keyword overlap — keeps the pipeline resilient and demonstrable end-to-end, at the cost of potentially masking a genuinely out-of-scope query as an answerable one.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="section-head"><h2>Principal / Staff engineer interview questions</h2></div>
+    <div class="qa-card">
+      <span class="qa-level">Staff</span>
+      <h4>Walk through exactly what guarantee the try/except/finally structure gives you, and what it does NOT guarantee about the telemetry.</h4>
+      <p>It guarantees that <b>every</b> invocation — success or failure — records latency (the <code>finally</code> block always runs) and that any exception sets the span status to ERROR with the exception message attached before re-raising, so a trace query for 'all failed requests in the last hour' will reliably find every failure with its associated span-level context. It does <b>not</b> guarantee the span/metric data survives a hard process crash (a SIGKILL mid-request loses whatever hasn't been flushed to the exporter yet) or that concurrent requests don't have interleaved span timing issues if the tracing SDK's context propagation is misconfigured — those require the exporter's own durability guarantees and correct async-context handling, which are outside what try/except/finally alone can provide.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Principal</span>
+      <h4>At 10,000 QPS, tracing every single request the way this project does becomes a real cost/overhead problem. How would you redesign the sampling strategy, and what do you lose?</h4>
+      <p>I'd move from 100%-sampled tracing to tail-based sampling: buffer spans briefly and only permanently keep traces that are 'interesting' — errors, high latency outliers, or a random baseline percentage of normal traffic for statistical visibility — rather than head-based sampling (deciding to sample at request start, before you know if it'll be interesting). The trade-off: tail sampling needs a collector layer that can buffer and make the keep/drop decision after the fact (e.g. the OpenTelemetry Collector's tail-sampling processor), adding infrastructure complexity and a small amount of end-to-end latency for that buffering decision, versus head sampling's simplicity but risk of dropping exactly the rare-but-important error traces you most want to keep.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Staff</span>
+      <h4>Your fallback returns the highest-scoring entry even at score=0 rather than an empty result. Isn't that just hiding a real 'no relevant data' case behind a fake answer?</h4>
+      <p>It's a deliberate trade-off, not a free lunch — the fallback prevents the pipeline from crashing on an edge case (zero keyword overlap), but you're right that on its own it risks generation producing a confident-sounding answer from irrelevant context. The actual mitigation is layered: this fallback keeps the <i>pipeline</i> resilient, while a separate groundedness/refusal check (the pattern project 01 implements explicitly) is what should prevent the <i>final answer</i> from claiming confidence it doesn't have — observability's job here is to make the fallback <b>visible</b> (a specific span attribute or counter incrementing on 'fallback used') so you can measure how often it fires and correlate it with downstream answer-quality metrics, not to prevent the fallback from ever happening.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Principal</span>
+      <h4>How would you use this project's telemetry to actually detect a quality regression — not a crash, but the model quietly getting worse — before users complain?</h4>
+      <p>Crashes and latency spikes show up in error rates and histograms directly, but silent quality regressions need a different signal: I'd add span attributes capturing retrieval confidence scores (was the fallback used, what was the top similarity score) and track their distribution over time — a rising rate of low-confidence retrievals or fallback usage is a leading indicator that the corpus or query distribution has drifted even before generation quality visibly degrades. Combined with periodic offline evaluation (project 22's Ragas/DeepEval pattern) sampling real production traffic, that gives you both a fast, cheap online proxy signal and a slower, more accurate ground-truth check, rather than relying on user complaints as your first quality signal.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Staff</span>
+      <h4>Why three nested child spans instead of one flat span for the whole pipeline? What would you lose with the flat version?</h4>
+      <p>Nested spans let you see exactly where time is spent within a single request — is a slow response due to retrieval (vector search), context assembly (string concatenation, usually fast), or generation (the LLM call, usually the dominant cost) — which is essential for debugging latency without guessing. A flat span would only tell you total pipeline latency and success/failure, forcing you to either add ad-hoc logging to localize a slow stage or reproduce the issue locally with a profiler — nested spans turn 'why was this request slow' from a debugging session into a single trace-viewer query, which is the entire point of structured tracing over plain logging.</p>
+    </div>
+
     <div class="footer-nav">
       <a href="index.html">← back to all flowcharts</a>
       <a href="https://github.com/abhi32dev/ai-infrastructure-platform-2/tree/main/13-observability" target="_blank" rel="noopener">13-observability source ↗</a>

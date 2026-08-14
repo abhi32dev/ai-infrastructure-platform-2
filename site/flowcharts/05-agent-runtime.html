@@ -69,6 +69,61 @@
       <span class="path">EXECNODE(attempt=1,fail) → RETRYING → EXECNODE(attempt=2,fail) → RETRYING → EXECNODE(attempt=3,ok) → SUCCEED</span>
     </div>
 
+    <div class="section-head"><h2>What this project actually does &amp; architecture trade-offs</h2></div>
+    <div class="arch-grid">
+      <div class="arch-block does">
+        <h4>What it does</h4>
+        <ul>
+        <li>Runs a real LangGraph state machine with a genuine process-crossing pause: <code>interrupt()</code> for human approval on risky actions, resumable from a fresh process via a persisted checkpoint and the same <code>thread_id</code>.</li>
+        <li>Enforces idempotency via a disk-backed store keyed by an explicit idempotency key, so the same logical action is never executed twice even across process restarts.</li>
+        <li>Bounds retries at a fixed maximum (<code>MAX_ATTEMPTS = 3</code>) rather than retrying indefinitely.</li>
+        </ul>
+      </div>
+      <div class="arch-block limits">
+        <h4>Known limitations</h4>
+        <ul>
+        <li>Idempotency store is a single JSON file — no concurrent-write safety, no TTL/expiry, and it grows unboundedly over the life of the system.</li>
+        <li>Risk classification (<code>RISKY_ACTIONS</code>) is a static hardcoded set, not derived from any policy engine or learned signal — adding a new risky action type requires a code change.</li>
+        <li>Retry logic doesn't distinguish transient failures (worth retrying) from permanent ones (not worth retrying) — every failure gets the same fixed-budget retry regardless of cause.</li>
+        </ul>
+      </div>
+      <div class="arch-block tradeoffs">
+        <h4>Architectural trade-offs</h4>
+        <ul>
+        <li>File-based checkpointing over a database-backed one for the demo — trivially inspectable and zero-infra, but not what you'd run in production, where you'd want a proper checkpointer (Postgres/Redis) with real concurrency guarantees.</li>
+        <li>Static risk-action set over a dynamic policy/rules engine — simpler to reason about and test deterministically, at the cost of requiring a code deploy to change what's considered risky.</li>
+        <li>Fixed retry budget over exponential-backoff-with-jitter — chosen for deterministic, fast tests; a production system would want backoff to avoid hammering a struggling downstream dependency.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="section-head"><h2>Principal / Staff engineer interview questions</h2></div>
+    <div class="qa-card">
+      <span class="qa-level">Staff</span>
+      <h4>You proved the human-approval pause survives a process restart. Walk through exactly what state has to be persisted for that to work, and what would break it.</h4>
+      <p>LangGraph's checkpointer persists the full graph state — including which node is currently paused at <code>interrupt()</code> — keyed by <code>thread_id</code>, to whatever backend is configured (a file/sqlite checkpointer in this demo). Resuming means opening a <b>new</b> checkpointer connection with the same <code>thread_id</code> and calling <code>graph.invoke(Command(resume=...))</code> — the new process doesn't need any in-memory state from the old one, only the persisted checkpoint and the thread ID. It breaks if the checkpoint backend isn't actually durable (e.g. an in-memory-only checkpointer) or if the thread_id isn't preserved/communicated to whatever resumes the flow — both would silently lose the pause.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Principal</span>
+      <h4>Your idempotency store is a single JSON file. What's the actual failure mode under concurrent workers, and how would you redesign it for a multi-worker deployment?</h4>
+      <p>A plain JSON file has no atomic read-modify-write guarantee — two workers checking 'has this key been executed' and then both writing 'now it has' can race and both execute the action, defeating the entire point of the store. I'd move to a backend with a real atomic compare-and-set primitive — Redis <code>SETNX</code> or a Postgres row with a unique constraint on the idempotency key and an INSERT-fails-if-exists check — so the 'claim this key' operation is atomic across workers, not just atomic within one process.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Staff</span>
+      <h4>The retry logic treats every failure identically. What's wrong with that in a real distributed system, and how would you fix it?</h4>
+      <p>Retrying a permanent failure (bad input, a 4xx-equivalent error) three times just wastes time and delays the eventual, correct failure signal — while retrying a transient failure (a momentary network blip) only three times with no backoff can still fail if the downstream needs more than a few hundred milliseconds to recover. I'd classify failures at the point they're raised (transient vs permanent, ideally via a typed exception hierarchy), skip retry entirely for permanent failures, and add exponential backoff with jitter for transient ones — the fixed-budget, no-backoff retry here is fine for a fast deterministic demo but wrong for anything hitting real infrastructure.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Principal</span>
+      <h4>This project hardcodes which actions require human approval. In a real ops platform, who owns that policy, and how would you let it change without a code deploy?</h4>
+      <p>I'd externalize <code>RISKY_ACTIONS</code> into a policy service or config store (even a simple versioned YAML/JSON in a config repo, reloaded periodically) owned by whoever's accountable for operational risk — SRE leadership or a platform-safety team, not the agent's own codebase. The graph's <code>decide_action()</code> node would query that policy at runtime instead of importing a Python constant. That decouples 'what's risky' (a policy decision, changes with organizational risk appetite) from 'how do we pause and resume for approval' (a mechanism, should rarely need to change) — mixing those two concerns in one hardcoded set is the actual design smell here, deliberately left simple for this portfolio's scope.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Staff</span>
+      <h4>If two different risky actions with the same idempotency key get submitted, what happens, and is that correct?</h4>
+      <p>As built, the idempotency store only tracks whether a <i>key</i> has been executed, not what action was associated with it — so a second, different action submitted under the same key would be silently skipped as a 'duplicate', which is wrong if it's actually a different action that happens to share a key (a caller bug, but one the system should catch). A more defensive version would store a hash of the action payload alongside the key and raise a conflict error if the same key arrives with different action content, rather than silently treating it as a legitimate replay.</p>
+    </div>
+
     <div class="footer-nav">
       <a href="index.html">← back to all flowcharts</a>
       <a href="https://github.com/abhi32dev/ai-infrastructure-platform-2/tree/main/05-agent-runtime" target="_blank" rel="noopener">05-agent-runtime source ↗</a>

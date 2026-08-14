@@ -64,6 +64,61 @@
       <span class="path">GENBASE('generic repetition') vs. GENFT('topically on-target phrasing') → COMPARE_OUT(honest, not cherry-picked)</span>
     </div>
 
+    <div class="section-head"><h2>What this project actually does &amp; architecture trade-offs</h2></div>
+    <div class="arch-grid">
+      <div class="arch-block does">
+        <h4>What it does</h4>
+        <ul>
+        <li>Verifies real 4-bit quantization is actually happening on Apple Silicon CPU by directly inspecting loaded model modules for <code>Linear4bit</code> layers — correcting a wrong assumption (from research claiming 'QLoRA is CUDA-only') by testing directly rather than trusting the commonly-cited claim.</li>
+        <li>Measures the exact parameter-efficiency of QLoRA directly: 147,456 trainable parameters out of 60,826,368 total (0.242%), verified by counting <code>p.requires_grad</code> parameters rather than assumed from config.</li>
+        <li>Directly verifies, via a negative test, that no parameter outside the LoRA adapter has <code>requires_grad=True</code> — proving the quantized base model is genuinely frozen, not just configured to appear frozen.</li>
+        </ul>
+      </div>
+      <div class="arch-block limits">
+        <h4>Known limitations</h4>
+        <ul>
+        <li>Trained on a tiny dataset (24 examples) and a small model (82M params) for demo purposes — the honest before/after comparison shows measurable phrasing shift toward the training pattern, not fluent task mastery, and the project is explicit about not overclaiming beyond that scope.</li>
+        <li>No hyperparameter sweep (LoRA rank, alpha, target modules) was run to find an optimal configuration — the chosen LoRA config is a reasonable default, not empirically tuned for this specific task/dataset.</li>
+        <li>CPU-only training (even with real 4-bit quantization) means training throughput is far below what a CUDA GPU with quantization would achieve — appropriate for this portfolio's scope and hardware, not representative of production fine-tuning throughput.</li>
+        </ul>
+      </div>
+      <div class="arch-block tradeoffs">
+        <h4>Architectural trade-offs</h4>
+        <ul>
+        <li>Testing the CUDA-only claim directly rather than trusting the commonly-cited research — cost extra investigation time, but avoided either wrongly abandoning a working approach or wrongly claiming something untested; the actual finding (bitsandbytes 0.50.1 does support real quantization on this CPU) directly contradicted the assumption.</li>
+        <li>A tiny 24-example dataset and small model for the demo over a larger, more realistic fine-tuning task — keeps training fast and fully reproducible on modest hardware, at the cost of the resulting model not being fluently capable, which the project's own evaluation is honest about rather than hiding.</li>
+        <li>A fresh, separate base-model copy for the before/after comparison over reusing the same loaded model — costs extra memory/load time, but guarantees a fair, uncontaminated comparison rather than risking any state leakage from the fine-tuning run into the 'before' baseline.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="section-head"><h2>Principal / Staff engineer interview questions</h2></div>
+    <div class="qa-card">
+      <span class="qa-level">Staff</span>
+      <h4>Walk through exactly how you verified quantization was 'real' rather than just trusting the library's configuration flags. Why does that distinction matter?</h4>
+      <p>Setting a quantization config flag only proves you <i>asked</i> for quantization — it doesn't prove the library actually applied it, especially on a less-common hardware/backend combination where a silent fallback to full precision is exactly the kind of bug that wouldn't raise any error, just silently cost you the memory/speed benefit you thought you were getting. I verified it by directly inspecting the loaded model's actual module types — checking <code>type(m).__name__ == 'Linear4bit'</code> across the model's layers — which confirms the weights are genuinely stored and computed in the quantized representation, not just that a config object requested it. That distinction matters because 'I configured X' and 'X actually happened' are different claims, and only the second one is true engineering verification rather than trust in an unverified assumption.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Principal</span>
+      <h4>You measured 0.242% trainable parameters. How would you decide, for a new fine-tuning task, whether that's the right LoRA configuration, versus needing a higher rank or more target modules?</h4>
+      <p>I'd treat LoRA rank/target-module selection as an empirical question, not a fixed default: run a small sweep (a few rank values, maybe with/without extending target modules beyond attention projections to include MLP layers) against a validation set representative of the actual downstream task, and look at the trade-off curve between trainable-parameter count and validation performance. The general heuristic is that more complex or more different-from-pretraining tasks benefit from higher rank or broader target-module coverage, while tasks close to what the base model already does well can get away with very low rank and count — but I wouldn't assert a specific configuration is 'right' without measuring it against this specific task's validation performance, since that's exactly the kind of decision that varies by task and shouldn't be guessed.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Staff</span>
+      <h4>Why does the honest before/after evaluation matter here, given the model didn't achieve fluent task performance? Isn't that just admitting the project didn't fully work?</h4>
+      <p>The evaluation's value isn't 'prove the model is good' — it's 'prove the training loop is doing what it claims to do', and those are different, both legitimate engineering questions. Measuring a real, directional phrasing shift toward the training pattern (rather than claiming fluent mastery that a 24-example, 82M-param setup couldn't plausibly achieve) is the honest, falsifiable claim that the gradient updates are genuinely flowing through the LoRA adapter and having a measurable effect — which is exactly what the earlier negative test (no gradients outside the adapter) and this evaluation together establish. Overclaiming fluent capability from an evaluation this small would be the actual failure — a claim the evidence doesn't support — whereas correctly scoping the claim to what the evidence shows is good engineering practice, not admission of failure.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Principal</span>
+      <h4>If you had to scale this from a tiny demo to fine-tuning a 7B-parameter model on a real dataset, what changes, and what stays the same?</h4>
+      <p>What stays conceptually identical: the QLoRA mechanism itself — quantize the frozen base, wrap with a LoRA adapter, train only the adapter's low-rank matrices — and the verification discipline (directly checking quantization actually applied, directly counting trainable parameters, directly testing that no unintended parameters receive gradients) should scale unchanged, since those checks are cheap and just as valuable at any model size. What changes substantially: you'd need real GPU hardware with CUDA (or at minimum a much more capable accelerator than CPU) since 7B-parameter training throughput on CPU would be impractically slow even with quantization; a properly-sized, deduplicated, and quality-filtered dataset instead of 24 hand-picked examples; and likely gradient checkpointing or other memory-saving techniques on top of quantization, since even a quantized 7B model plus optimizer state for the adapter needs careful memory budgeting on real GPU hardware.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Staff</span>
+      <h4>The negative test proves no parameter outside the LoRA adapter has `requires_grad=True`. What would it mean if that test failed, and how would you debug it?</h4>
+      <p>If it failed, it would mean the base model isn't actually frozen — some subset of the pretrained weights would be receiving gradient updates alongside the LoRA adapter, which defeats QLoRA's core purpose (training only a tiny fraction of parameters) and could also mean the memory savings you're relying on are illusory, since unfrozen quantized parameters typically need to be dequantized to compute gradients against. I'd debug it by walking <code>model.named_parameters()</code> and checking <code>requires_grad</code> per-name to find exactly which parameters are unexpectedly trainable — the likely culprits would be a step ordering bug (e.g. calling <code>get_peft_model()</code> before <code>prepare_model_for_kbit_training()</code> fully froze the base, or a target-module config accidentally matching more layers than intended) rather than a library bug, since this is a well-established, widely-used code path in the PEFT library.</p>
+    </div>
+
     <div class="footer-nav">
       <a href="index.html">← back to all flowcharts</a>
       <a href="https://github.com/abhi32dev/ai-infrastructure-platform-2/tree/main/18-lora-finetuning" target="_blank" rel="noopener">18-lora-finetuning source ↗</a>

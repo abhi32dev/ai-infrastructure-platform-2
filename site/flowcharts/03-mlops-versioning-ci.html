@@ -64,6 +64,61 @@
       <span class="path">RUNEVAL → ISUPDATE(Yes) → WRITEBASE → EXIT0A</span>
     </div>
 
+    <div class="section-head"><h2>What this project actually does &amp; architecture trade-offs</h2></div>
+    <div class="arch-grid">
+      <div class="arch-block does">
+        <h4>What it does</h4>
+        <ul>
+        <li>Runs an MLflow-backed regression gate in CI: every run logs metrics, then compares this run's <code>agreement_rate</code> against a committed baseline, failing the build if it regressed.</li>
+        <li>Separates baseline <b>updates</b> (requires an explicit <code>--update-baseline</code> flag) from baseline <b>checks</b> (automatic, every CI run) so the baseline never silently ratchets down.</li>
+        <li>Handles the first-run-ever case by establishing the baseline automatically rather than crashing on a missing file.</li>
+        </ul>
+      </div>
+      <div class="arch-block limits">
+        <h4>Known limitations</h4>
+        <ul>
+        <li>Regression is judged on a single scalar metric (<code>agreement_rate</code>) with zero tolerance — no statistical significance testing, so a run that's worse by noise alone can fail the build.</li>
+        <li>The baseline file is a single JSON file in the repo, not versioned per-model or per-environment — there's no way to track multiple concurrently-valid baselines (e.g. one per deployment target).</li>
+        <li>No automatic rollback or alerting integration — a failed gate just exits non-zero; a human still has to notice and act.</li>
+        </ul>
+      </div>
+      <div class="arch-block tradeoffs">
+        <h4>Architectural trade-offs</h4>
+        <ul>
+        <li>Zero-tolerance strict comparison (<code>REGRESSION_TOLERANCE = 0.0</code>) over a noise-band threshold — chosen for simplicity and to force explicit human judgment on any regression, at the cost of possible false-positive CI failures on borderline noise.</li>
+        <li>Human-gated baseline promotion over auto-promotion-on-green — deliberately slower, to prevent a slow-bleed regression from ratcheting the baseline downward unnoticed over many small merges.</li>
+        <li>MLflow local tracking store over a hosted MLflow server — zero infra cost for the demo, at the cost of no team-wide shared run history.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="section-head"><h2>Principal / Staff engineer interview questions</h2></div>
+    <div class="qa-card">
+      <span class="qa-level">Staff</span>
+      <h4>Your regression check uses a strict `<` comparison with zero tolerance. What's the actual failure mode of that design in a noisy CI environment, and how would you fix it without losing the safety property?</h4>
+      <p>With zero tolerance, any run that scores even 0.0001 below baseline fails — including pure evaluation noise from nondeterministic model sampling or dataset ordering. I'd replace the point comparison with a statistical test: run the eval multiple times (or bootstrap the existing eval set), compute a confidence interval on the agreement rate, and fail only if the new run's upper bound is below the baseline's lower bound minus a tolerance band. That's a direct application of the same significance-testing logic project 07 builds standalone — the two projects should really share that harness.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Principal</span>
+      <h4>Why is baseline promotion a manual flag instead of automatic on a green build — isn't that just adding toil?</h4>
+      <p>It's a deliberate asymmetry: auto-promoting on every green run means a sequence of many tiny, individually-non-significant regressions can compound into a large one with zero human ever reviewing the trend — 'boiling frog' baseline decay. Requiring <code>--update-baseline</code> forces a human (or a separate, explicitly-reviewed promotion job) to look at the number and decide it's a real improvement worth committing as the new floor. The toil cost is one flag on genuine improvements; the risk avoided is silent, cumulative quality decay in a metric nobody's watching closely enough to catch increment-by-increment.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Staff</span>
+      <h4>This gate only tracks one metric. In a real system you'd have latency, cost, and multiple quality metrics. How would you extend this without turning the gate into an unmaintainable pile of if-statements?</h4>
+      <p>I'd generalize <code>load_baseline()</code>/the comparison function to take a list of metric specs — each with its own comparison direction (higher-is-better vs lower-is-better), tolerance, and severity (hard-fail vs warn-only) — and iterate over them, collecting all violations before failing, rather than the current single hard-coded comparison. This is the same pattern real gating tools (e.g. Great Expectations, or a custom metrics-contract YAML) use: data-driven checks over hard-coded conditionals, so adding a new metric is a config change, not a code change.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Principal</span>
+      <h4>The baseline is a single JSON file in the repo. What breaks when you need per-environment baselines (staging vs prod) or per-model-variant baselines, and how would you redesign the storage?</h4>
+      <p>A flat file with no namespacing means two teams or two environments would either clobber each other's baseline or need entirely separate copies of this whole pipeline. I'd move the baseline into MLflow's own model registry as a tagged/aliased run (e.g. an MLflow Model Version alias like <code>champion</code> per environment), so 'what's the current baseline for staging' is a registry query, not a file path convention — and promotion becomes a registry API call with full history, rather than an overwritten JSON file with only git history to fall back on.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Staff</span>
+      <h4>What's the actual bug class this gate is designed to catch that a normal unit test suite wouldn't?</h4>
+      <p>Unit tests catch functional regressions — code that crashes or produces the wrong type/shape. This gate catches <i>quality</i> regressions — code that runs fine and produces plausible-looking output, but is measurably worse against real evaluation data (e.g. a prompt tweak that quietly drops agreement rate). That class of bug is invisible to assertion-based tests because there's no single 'correct' output to assert against — only a statistical property of many outputs, which is exactly what a regression gate against a logged metric baseline is built to detect.</p>
+    </div>
+
     <div class="footer-nav">
       <a href="index.html">← back to all flowcharts</a>
       <a href="https://github.com/abhi32dev/ai-infrastructure-platform-2/tree/main/03-mlops-versioning-ci" target="_blank" rel="noopener">03-mlops-versioning-ci source ↗</a>

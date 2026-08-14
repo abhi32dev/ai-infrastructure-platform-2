@@ -63,6 +63,61 @@
       <span class="path">LATCHECK(int8 &lt; fp32? expected Yes) → ACTUALSLOW(measured No — INT8 slower) → reported honestly, not hidden</span>
     </div>
 
+    <div class="section-head"><h2>What this project actually does &amp; architecture trade-offs</h2></div>
+    <div class="arch-grid">
+      <div class="arch-block does">
+        <h4>What it does</h4>
+        <ul>
+        <li>Diagnosed and fixed a real ONNX exporter bug: the newer dynamo-based exporter (PyTorch's new default) produced a graph that broke <code>onnxruntime.quantize_dynamic</code> with a shape-inference error, fixed by explicitly passing <code>dynamo=False</code> to use the older TorchScript-based exporter instead.</li>
+        <li>Applies dynamic (weights-only) INT8 quantization via <code>quantize_dynamic(..., weight_type=QUInt8)</code>, achieving a measured 72.3% file-size reduction with accuracy held within noise (+0.003) for a 2-epoch training run.</li>
+        <li>Measured, rather than assumed, that INT8 quantized inference is actually 3-4x SLOWER than fp32 on this CPU — reproduced across three separate runs to rule out a one-off fluke — directly contradicting the intuitive assumption that quantization always speeds things up.</li>
+        </ul>
+      </div>
+      <div class="arch-block limits">
+        <h4>Known limitations</h4>
+        <ul>
+        <li>The counter-intuitive latency finding (INT8 slower than fp32) is specific to this model size, this CPU, and dynamic quantization mode — it's a real, reproduced measurement, but doesn't generalize to claim 'quantization is always slower', only 'don't assume it's faster without measuring on your specific setup'.</li>
+        <li>Only dynamic quantization was tested — static quantization (which requires a calibration dataset but typically has different, often better, inference-time characteristics) wasn't evaluated as an alternative.</li>
+        <li>No comparison against ONNX Runtime's other optimization levers (graph optimization passes, operator fusion) independent of quantization — the project isolates quantization's effect specifically, not the full space of ONNX Runtime speedups.</li>
+        </ul>
+      </div>
+      <div class="arch-block tradeoffs">
+        <h4>Architectural trade-offs</h4>
+        <ul>
+        <li>Dynamic quantization over static — avoids needing a calibration dataset, which is simpler and faster to implement for a demo project, at the cost of dynamic quantization's runtime dequantization overhead, which is the actual root cause of the measured slowdown on this small model.</li>
+        <li>The legacy TorchScript-based ONNX exporter over the newer dynamo-based default — fixes real compatibility with the quantization tool being used right now, at the cost of using a code path PyTorch is gradually deprecating in favor of dynamo, meaning this fix may itself need revisiting as the ecosystem matures.</li>
+        <li>Reporting the counter-intuitive slowdown honestly over omitting or downplaying it — a less impressive-sounding result, but a more useful and more credible one; the project's value here is precisely that it measured instead of assumed.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="section-head"><h2>Principal / Staff engineer interview questions</h2></div>
+    <div class="qa-card">
+      <span class="qa-level">Staff</span>
+      <h4>Walk through why dynamic quantization specifically produced a SLOWER model here, at the mechanism level — not just 'it measured slower', but why.</h4>
+      <p>Dynamic quantization stores weights in INT8 (the size win) but computes activations in floating point at runtime, requiring the weights to be dequantized back to floating point on every forward pass before the actual matmul — that dequantization is pure runtime overhead with no corresponding speedup, since the underlying compute still happens in fp32. For a large model where memory bandwidth (moving weights from memory to compute) dominates total cost, the smaller INT8 weights reduce memory traffic enough to offset the dequantization overhead and net a speedup. For a model this small, memory bandwidth was never the bottleneck to begin with, so the dequantization overhead is pure added cost with no offsetting benefit — which is exactly the mechanism behind the measured 3-4x slowdown, and why the finding is specific to model size, not quantization in general.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Principal</span>
+      <h4>Given this finding, how would you decide whether to actually ship quantization for a given model, rather than assuming it's always a win because 'quantization = smaller = faster' is the common belief?</h4>
+      <p>I'd never ship a quantization decision without measuring the actual latency on the target inference hardware and target model size, precisely because this project's own finding falsifies the naive assumption — 'smaller' (file size, memory footprint) and 'faster' (inference latency) are related but not the same claim, and can diverge, especially for smaller models or models where memory bandwidth isn't the bottleneck. I'd measure both static and dynamic quantization against the un-quantized baseline on real target hardware, weigh the actual measured latency delta against the actual deployment need (is file size / memory footprint the real constraint, e.g. edge deployment, or is latency the real constraint, e.g. a hot serving path) — and only ship quantization where the measured trade-off matches what the deployment actually needs, not by default.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Staff</span>
+      <h4>Explain the exporter bug precisely: why would a shape-inference error in the dynamo path specifically break quantization, when the model still exports and presumably still runs correctly?</h4>
+      <p>The dynamo-based exporter produces a structurally different ONNX graph representation than the legacy TorchScript-based exporter — a graph that's valid enough to load and run inference on directly, but whose shape/type metadata wasn't fully compatible with what <code>onnxruntime.quantize_dynamic</code>'s internal shape-inference pass expected when analyzing the graph to decide which operators to quantize. This is a case where 'the model works' and 'the model is compatible with this specific downstream tool' are different bars — the export succeeding and producing correct inference doesn't guarantee every downstream tool in the ecosystem has caught up with a newer exporter's graph representation, which is precisely the kind of tooling-maturity gap you hit when adopting a 'new default' before the surrounding ecosystem has fully adapted to it.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Principal</span>
+      <h4>This project's ONNX export fix (`dynamo=False`) uses a code path PyTorch is deprecating. How would you future-proof this pipeline against that deprecation eventually breaking the build?</h4>
+      <p>I'd pin the exact PyTorch and ONNX Runtime versions this fix is verified against in the project's dependency lock file (rather than an open-ended version range), and add this exact export-then-quantize step as an explicit CI check that fails loudly the moment either a PyTorch upgrade breaks the legacy exporter path or a future PyTorch/ONNX Runtime combination resolves the dynamo-path incompatibility (at which point I'd want to know, so I could migrate off the deprecated path deliberately rather than being forced off it by a build breakage) — the goal is converting an eventual silent breakage into an explicit, actionable CI signal at the moment the ecosystem shifts, not preventing the shift itself.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Staff</span>
+      <h4>You measured a 72.3% size reduction with accuracy held within noise. How do you know '+0.003 accuracy' is actually noise and not, say, a real (if small) improvement from quantization's regularizing effect?</h4>
+      <p>A single point-estimate difference this small, from a 2-epoch training run on presumably a modest evaluation set, isn't enough on its own to distinguish 'quantization has a small regularizing effect' from 'this particular evaluation run's randomness (data ordering, any remaining stochasticity in inference) happened to land slightly higher' — you'd need to establish a noise band by running the same evaluation multiple times (or bootstrapping the eval set) to see the natural variance in the accuracy metric itself, then check whether +0.003 falls inside or outside that band, the same statistical rigor project 07's harness applies to A/B results. Absent that measurement, the honest claim is 'accuracy did not measurably regress', not 'accuracy improved' — the project's own framing ('within noise') is appropriately conservative given what was actually measured.</p>
+    </div>
+
     <div class="footer-nav">
       <a href="index.html">← back to all flowcharts</a>
       <a href="https://github.com/abhi32dev/ai-infrastructure-platform-2/tree/main/19-quantization-onnx" target="_blank" rel="noopener">19-quantization-onnx source ↗</a>

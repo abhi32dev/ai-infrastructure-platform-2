@@ -64,6 +64,61 @@
       <span class="path">[BROKEN]: 4 server lifecycles in 1 session → contention → NOISY result — FIXED by exactly 2 lifecycles, matching the clean demo pattern</span>
     </div>
 
+    <div class="section-head"><h2>What this project actually does &amp; architecture trade-offs</h2></div>
+    <div class="arch-grid">
+      <div class="arch-block does">
+        <h4>What it does</h4>
+        <ul>
+        <li>Benchmarks continuous batching's real throughput impact by comparing aggregate <code>tokens_per_sec</code> between <code>--parallel 1</code> and <code>--parallel 4</code> server configurations, same model and hardware, only the batching config differing.</li>
+        <li>Measured a consistent 2.09-2.27x throughput improvement from batching across repeated clean runs, using a real thread pool of 8 concurrent requests to actually exercise server-side batching.</li>
+        <li>Found and fixed a real test-flakiness bug: running 3-4 separate server lifecycles in one pytest session introduced measurement contention that once made batched throughput measure LOWER than serial — pure noise from too much server churn in one process, not a real regression.</li>
+        </ul>
+      </div>
+      <div class="arch-block limits">
+        <h4>Known limitations</h4>
+        <ul>
+        <li>Benchmarks run on one machine's hardware with one model size — the throughput multiplier measured (2.09-2.27x) is specific to this hardware/model/request-pattern combination and wouldn't directly transfer to a different GPU, model size, or request-size distribution without re-measuring.</li>
+        <li>8 concurrent requests via a thread pool tests server-side batching behavior, but doesn't validate behavior under realistic production request-arrival patterns (Poisson-distributed arrivals, mixed request sizes) rather than a synchronized burst.</li>
+        <li>No comparison against alternative serving strategies (e.g. speculative decoding, different batching algorithms like continuous vs. static batching) — this measures one specific serving configuration's win over another, not a survey of the full design space.</li>
+        </ul>
+      </div>
+      <div class="arch-block tradeoffs">
+        <h4>Architectural trade-offs</h4>
+        <ul>
+        <li>Exactly 2 server lifecycles per test file over more granular per-test-function server restarts — the real fix for the flakiness bug; fewer server lifecycles means less measurement contention, at the cost of tests within a file sharing server state (managed carefully to avoid cross-test interference).</li>
+        <li>A ThreadPoolExecutor for concurrent request firing over async/await — simpler to reason about for a benchmark script's purposes, at the cost of Python threading overhead being a (small, likely negligible relative to network/inference time) confound in absolute latency numbers.</li>
+        <li>Polling `/health` for readiness over a fixed startup sleep — makes the benchmark robust to variable server startup time, at the cost of two distinct failure modes (crash vs. slow-start) needing to be handled separately in the wait loop.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="section-head"><h2>Principal / Staff engineer interview questions</h2></div>
+    <div class="qa-card">
+      <span class="qa-level">Staff</span>
+      <h4>Walk through exactly why running 3-4 server lifecycles in one pytest session introduced measurement noise, and why the fix was reducing to 2 lifecycles rather than something else.</h4>
+      <p>Each server start/stop cycle involves process spawn, model load, port binding, and teardown — rapid, repeated cycling of that within one process (pytest session) can leave residual resource contention (OS-level socket/file-descriptor cleanup timing, memory not yet fully reclaimed, CPU scheduling artifacts from the just-killed process) that bleeds into the next server's measured performance, especially for a latency/throughput-sensitive benchmark. The fix — restructuring to exactly 2 sequential server lifecycles per test file, matching the clean demo's own pattern — wasn't an arbitrary number; it's the minimum needed to run the actual serial-vs-parallel comparison (one lifecycle per configuration) without introducing a third or fourth cycle purely for other test setup, which is what the flaky version was doing.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Principal</span>
+      <h4>You measured a specific 2.09-2.27x multiplier on this hardware. How would you communicate that result to a team about to make a real capacity-planning decision, without them over-generalizing it?</h4>
+      <p>I'd present it explicitly scoped: 'on this specific hardware, this specific model size, under a synchronized 8-concurrent-request burst pattern, batching gave 2.09-2.27x throughput' — and flag the three biggest things that could change the number for their actual workload: different model size (larger models often see different batching efficiency curves), different request-arrival pattern (their production traffic likely isn't a synchronized burst, so the practical gain under realistic Poisson arrivals needs its own measurement), and different hardware (GPU memory bandwidth and compute characteristics directly affect how much batching helps). I'd recommend they re-run this same benchmark methodology against their actual model and a realistic traffic replay before using any specific multiplier in a capacity plan — the value of this project is the methodology, not a portable number.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Staff</span>
+      <h4>Why poll `/health` for readiness instead of a fixed sleep before starting the benchmark, and what are the two failure modes you specifically handle differently?</h4>
+      <p>A fixed sleep is either wasteful (sleeping longer than needed on a fast-starting server, slowing every test run) or flaky (too short on a slow-starting server, causing the benchmark to fire requests at a server that isn't ready yet, corrupting the measurement with connection-refused errors). Polling <code>/health</code> every 0.5s up to a 60s timeout adapts to actual startup time. The two failure modes handled separately: the server process exiting early (a real crash — should fail fast and loudly, since retrying against a dead process forever is pointless) versus simply not yet responding within the timeout (could be a slow but eventually-successful startup, or a genuinely hung process — treated as a timeout failure with a clear error rather than hanging the test suite indefinitely).</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Principal</span>
+      <h4>If you had to extend this project to benchmark speculative decoding against standard batched decoding, what would you need to change about the measurement methodology?</h4>
+      <p>Throughput alone (tokens_per_sec) isn't sufficient to compare them fairly — speculative decoding's speedup is workload-dependent (it wins big on predictable/repetitive text, less on high-entropy generation) and its acceptance rate (how often the draft model's guesses are actually accepted by the target model) needs to be measured and reported alongside raw throughput, or the comparison is misleading for workloads unlike whatever you happened to test. I'd extend the benchmark to run against multiple text distributions (structured/predictable vs. creative/high-entropy prompts) and report both aggregate throughput AND acceptance rate per distribution, rather than a single number — this project's current 'one throughput number per config' methodology is sufficient for batching (which doesn't have workload-dependent variance in the same way) but would be misleading if reused as-is for speculative decoding.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Staff</span>
+      <h4>Your benchmark uses a ThreadPoolExecutor with `max_workers=n_requests` to fire requests 'as close to simultaneously as Python threading allows'. What's the actual limitation of that phrase, and does it matter for this benchmark's conclusions?</h4>
+      <p>Python threads are subject to the GIL for any CPU-bound work, but firing an HTTP request is mostly I/O-bound (waiting on network/socket calls), so the GIL releases during the blocking I/O call and threads genuinely can have their requests in-flight concurrently — the real limitation is scheduling jitter: the OS thread scheduler doesn't guarantee all 8 threads start their request at the exact same microsecond, so 'concurrent' here means 'overlapping within a small window', not 'perfectly synchronized'. For this benchmark's conclusion (does server-side batching improve throughput under concurrent load), that's an acceptable approximation — the server still sees genuinely overlapping requests it can batch — but it would matter more for a benchmark specifically trying to measure batching behavior under a precisely-timed burst pattern, where you'd want asyncio with an explicit barrier/gather instead.</p>
+    </div>
+
     <div class="footer-nav">
       <a href="index.html">← back to all flowcharts</a>
       <a href="https://github.com/abhi32dev/ai-infrastructure-platform-2/tree/main/17-inference-serving" target="_blank" rel="noopener">17-inference-serving source ↗</a>

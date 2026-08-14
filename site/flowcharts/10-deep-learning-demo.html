@@ -64,6 +64,61 @@
       <span class="path">step([real, spurious]) → CREATEALL(spurious → new track) → step([real only]) → spurious track: MARKMISSED → eventually PRUNEd</span>
     </div>
 
+    <div class="section-head"><h2>What this project actually does &amp; architecture trade-offs</h2></div>
+    <div class="arch-grid">
+      <div class="arch-block does">
+        <h4>What it does</h4>
+        <ul>
+        <li>Fine-tunes a Faster R-CNN object detector via transfer learning, and found a real, reproduced bug: MPS (Apple Silicon GPU) training produced NaN losses while identical CPU training converged normally.</li>
+        <li>Implements a from-scratch greedy IoU tracker: sorts all (track, detection) pairs by IoU, greedily claims the strongest matches first, and tolerates brief occlusion (missed detections) for up to <code>max_missed</code> frames before dropping a track.</li>
+        <li>Filters low-confidence detections (below <code>SCORE_THRESHOLD</code>) before IoU matching, so a low-confidence box overlapping the ground truth doesn't count as a correct detection.</li>
+        </ul>
+      </div>
+      <div class="arch-block limits">
+        <h4>Known limitations</h4>
+        <ul>
+        <li>The MPS bug was root-caused by isolating a single-sample forward pass, but the underlying cause (a specific op's numerical behavior on MPS) wasn't traced deeper than 'CPU works, MPS doesn't' — no PyTorch issue filed or op-level diagnosis.</li>
+        <li>The IoU tracker is purely geometric (position/overlap-based) — no appearance/re-identification features, so it can swap identities between two crossing objects with similar trajectories.</li>
+        <li>max_missed is a fixed constant, not adapted to frame rate or object velocity — a fast-moving object briefly occluded needs a different tolerance than a slow one.</li>
+        </ul>
+      </div>
+      <div class="arch-block tradeoffs">
+        <h4>Architectural trade-offs</h4>
+        <ul>
+        <li>CPU-forced training over debugging the MPS numerical issue further — pragmatic for a portfolio project on a timeline, at the cost of not fully understanding (or fixing upstream) the actual MPS bug.</li>
+        <li>Greedy IoU matching over the Hungarian algorithm (optimal bipartite matching) — much simpler to implement and reason about, at the cost of not guaranteeing a globally optimal assignment when multiple tracks compete for overlapping detections.</li>
+        <li>A fixed occlusion tolerance over a velocity-adaptive one — simpler and sufficient for the demo's synthetic-motion test cases, at the cost of not generalizing well to real, variable-speed footage.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="section-head"><h2>Principal / Staff engineer interview questions</h2></div>
+    <div class="qa-card">
+      <span class="qa-level">Staff</span>
+      <h4>You found MPS training produces NaN losses where CPU doesn't. Walk through your actual debugging process — how do you isolate 'which op' or 'which layer' is the source of a NaN without just guessing?</h4>
+      <p>The systematic approach: first confirm it's actually a numerics issue and not a data issue by running the exact same batch through both backends and diffing intermediate outputs layer-by-layer (register forward hooks, compare activations after each module) — the layer where CPU and MPS outputs first diverge meaningfully (not just floating-point noise) is your suspect. I isolated it by dropping to a single-sample forward pass specifically because a full batch obscures which sample or which layer first produces a NaN — reducing the surface area is the key move; from there you'd check for known MPS gaps (certain reduction ops, mixed-precision paths) against the PyTorch MPS issue tracker rather than assuming it's your model code.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Principal</span>
+      <h4>Given you found a real backend-specific numerical bug, how would you decide whether this is 'my problem to work around' versus 'a bug to report upstream and wait for a fix'?</h4>
+      <p>The decision hinges on blast radius and reproducibility: if I can produce a minimal, backend-agnostic repro (a small script, no project-specific code) that shows the divergence, that's worth filing upstream regardless of what I do locally, because other users will hit the same wall. Locally, the decision is about timeline and risk tolerance — CPU-forcing was the right call here for a portfolio project with a hard deadline and no requirement for GPU throughput, but for a production training pipeline that actually needs MPS's speed, I'd weigh the cost of waiting for an upstream fix against workarounds like mixed-precision toggling or op substitution, and file the upstream issue either way so the fix eventually lands.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Staff</span>
+      <h4>Your IoU tracker uses greedy matching, not the Hungarian algorithm. Give a concrete scenario where that produces a worse assignment, and explain why you didn't just use the optimal algorithm.</h4>
+      <p>Concrete case: three tracks and three detections where greedy claims the single highest-IoU pair first (say track A to detection 2), which then forces the remaining two tracks into a worse combined assignment than if the algorithm had considered all three pairings jointly — the Hungarian algorithm would find the assignment that minimizes total cost (or maximizes total IoU) across all pairs simultaneously, which greedy doesn't guarantee. I didn't require Hungarian here because greedy is O(n log n) versus Hungarian's O(n³), is far simpler to implement and debug, and for the small, mostly-well-separated object counts this demo's synthetic scenarios use, the assignment quality difference is negligible — I'd switch to Hungarian (scipy has a built-in implementation) the moment real footage showed greedy producing visibly wrong assignments under crowding.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Principal</span>
+      <h4>The tracker has no appearance/re-ID model — just geometry. When does that actually matter in a real deployment, and what would you add?</h4>
+      <p>It matters whenever two tracked objects cross paths, occlude each other, or move close enough that their bounding boxes' IoU-based association becomes ambiguous — pure geometry has no way to tell 'the person who was on the left is still the person on the left' versus 'they swapped' once their boxes overlap and separate. For a real deployment (retail analytics, traffic counting) I'd add a lightweight appearance embedding (a small ReID CNN or even a simple color-histogram feature) computed per detection, and extend the matching cost to combine IoU with embedding similarity — this is the standard approach in DeepSORT-style trackers, and it's specifically the crossing-paths case where it earns its extra compute cost.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Staff</span>
+      <h4>Why filter low-confidence detections before IoU matching instead of after, and what would go wrong with the opposite order?</h4>
+      <p>Filtering first means the tracker's matching logic only ever considers detections the model is actually confident about, so a spurious low-confidence box never gets the chance to steal a good IoU match away from the real detection or spawn a bogus new track. If you matched first and filtered after, a low-confidence false detection with high geometric overlap could win the greedy match against the correct high-confidence detection (since greedy sorts by IoU, not by confidence), incorrectly updating a track with garbage, or a low-confidence detection could still spawn a short-lived phantom track before being filtered — filtering upstream of matching is strictly safer and is the same reasoning that puts <code>SCORE_THRESHOLD</code> filtering before the greedy matching loop in this project's code.</p>
+    </div>
+
     <div class="footer-nav">
       <a href="index.html">← back to all flowcharts</a>
       <a href="https://github.com/abhi32dev/ai-infrastructure-platform-2/tree/main/10-deep-learning-demo" target="_blank" rel="noopener">10-deep-learning-demo source ↗</a>

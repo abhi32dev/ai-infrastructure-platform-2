@@ -63,6 +63,61 @@
       <span class="path">TIMECHECK(zero snapshots qualify) → DROPROW → row absent from result DataFrame</span>
     </div>
 
+    <div class="section-head"><h2>What this project actually does &amp; architecture trade-offs</h2></div>
+    <div class="arch-grid">
+      <div class="arch-block does">
+        <h4>What it does</h4>
+        <ul>
+        <li>Proves Feast's point-in-time join correctness with real, deliberately-diverging data: a user with feature snapshots at day 0, day 30, and day 60, where querying 'as of day 15' correctly returns the day-0 value, never the later day-30 or day-60 values — no future information leaks backward.</li>
+        <li>Found and documented a real, non-obvious Feast behavior: when a query timestamp predates a user's earliest recorded snapshot, the row is silently DROPPED from the result entirely, not returned as a null-filled row — verified directly by checking <code>len(result) == 0</code>.</li>
+        <li>Contrasts the point-in-time-correct offline path against the online path (<code>get_online_features()</code>), which has no timestamp parameter at all and always returns whatever was most recently materialized — proven to return a genuinely different value for the same user.</li>
+        </ul>
+      </div>
+      <div class="arch-block limits">
+        <h4>Known limitations</h4>
+        <ul>
+        <li>Uses Feast's local file-based offline store — validates the point-in-time join semantics correctly, but doesn't exercise the operational characteristics (query performance, concurrency) of a production offline store (BigQuery, Snowflake, Redshift).</li>
+        <li>The materialize-to-online-store step is manual/on-demand in this demo — a real production system needs a scheduled materialization pipeline with defined freshness SLAs, which isn't implemented here.</li>
+        <li>Single-entity (user) feature examples — doesn't demonstrate more complex real-world cases like feature joins across multiple entity types or streaming feature ingestion.</li>
+        </ul>
+      </div>
+      <div class="arch-block tradeoffs">
+        <h4>Architectural trade-offs</h4>
+        <ul>
+        <li>Local file-based offline store over a cloud data warehouse backend — zero infrastructure cost and fully reproducible for the demo, at the cost of not validating production-scale query performance characteristics.</li>
+        <li>Deliberately constructing data with known, provable divergence (day 0 vs day 30 vs day 60 values) over using realistic-but-unverifiable production data — makes point-in-time correctness directly testable and falsifiable, which is the actual point of this project.</li>
+        <li>Documenting the row-dropping behavior on pre-snapshot queries as a known finding rather than working around it — treats correct-but-surprising library behavior as something to understand and document, not silently patch around, since patching it would mean overriding Feast's own (defensible) semantics.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="section-head"><h2>Principal / Staff engineer interview questions</h2></div>
+    <div class="qa-card">
+      <span class="qa-level">Staff</span>
+      <h4>Walk through exactly what 'point-in-time correctness' means here and why a naive join (e.g. just take the latest row per user) would be wrong for training data.</h4>
+      <p>Point-in-time correctness means: for a training example labeled at some historical timestamp T, the features joined to it must be exactly what was known and true <b>as of T</b> — not what became true later. A naive 'just take the latest row per user' join would leak future information into training data: if you're training a model to predict something at day 15 using a user's day-30 feature snapshot (which didn't exist yet at day 15), you're training on information the model could never have had access to at prediction time — this is a real, common, and often silent bug in ML training pipelines, sometimes called 'label leakage' or 'feature leakage', and it makes offline evaluation metrics look artificially good in a way that doesn't hold up once the model is actually deployed and only has access to genuinely-as-of-now features.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Principal</span>
+      <h4>You found that pre-snapshot queries silently DROP the row rather than returning nulls. Is that the right behavior for a feature store to have, and what would you tell a team surprised by it in production?</h4>
+      <p>It's defensible, arguably correct behavior — a null-filled row implicitly claims 'we know this user had no meaningful feature value at this time', which is a stronger, potentially misleading claim than 'we have no data for this user before this time', so dropping is more honest than fabricating a null. But it's dangerous precisely because it's silent: a training pipeline that expects one row per input example will silently end up with fewer rows than expected, which can skew a training set's composition (systematically dropping users with shorter history, for example) without any visible error. I'd tell a surprised team: check your row counts before and after the point-in-time join as a standard pipeline assertion, and decide explicitly — per use case — whether dropped rows should be backfilled with a documented default, excluded (accepting the composition skew), or treated as a hard pipeline failure if any drop is unexpected for your specific data.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Staff</span>
+      <h4>Why is the online path's behavior (always-latest, no timestamp) architecturally correct for serving, when it's exactly the behavior that would be wrong for training?</h4>
+      <p>Serving and training have fundamentally different temporal semantics by design: at serving time, you want the freshest available features because that's genuinely what's known right now — there's no 'point in time' to be correct with respect to, since the query IS the present moment. The apparent contradiction (same feature store, opposite temporal behavior on two paths) isn't actually a contradiction — it's the feature store correctly modeling that training needs historical-as-of-then correctness (to avoid leakage) while serving needs current-as-of-now freshness (to make the best possible real-time decision), and Feast's two distinct APIs (<code>get_historical_features</code> for offline/training, <code>get_online_features</code> for serving) exist specifically to give each use case the correct semantics rather than forcing one compromise behavior onto both.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Principal</span>
+      <h4>How would you actually validate, in a real production ML system, that training/serving skew from this feature store isn't happening — beyond trusting that point-in-time joins are implemented correctly?</h4>
+      <p>I'd add an online/offline consistency check as a standing operational practice: periodically sample a set of (entity, timestamp=now) pairs, fetch features via both the online path and a point-in-time offline query at that same timestamp, and diff them — in the steady state (assuming materialization is current) they should match closely; systematic divergence signals either a materialization lag problem or a genuine bug in one of the two paths. This is exactly the same 'don't trust it, measure it' discipline this project already applies by directly proving point-in-time correctness with constructed data — extending it to an ongoing production check catches training/serving skew (a notoriously hard-to-detect class of ML bug) before it silently degrades a live model's real-world performance relative to its offline-evaluated performance.</p>
+    </div>
+    <div class="qa-card">
+      <span class="qa-level">Staff</span>
+      <h4>This demo uses a local file-based offline store. What specifically changes about point-in-time join correctness risk when you move to a real warehouse backend like BigQuery?</h4>
+      <p>The correctness semantics themselves don't change — Feast's point-in-time join logic is backend-agnostic by design, so the same 'only snapshots with event_timestamp <= query timestamp qualify, pick the latest qualifying one' logic applies identically against BigQuery. What changes is the risk surface around <i>performance and scale</i> — a point-in-time join against a warehouse with billions of rows needs to be expressed as an efficient SQL query (Feast generates this for you), and getting that query plan wrong (e.g. a missing partition/clustering strategy on the underlying tables) can turn a correctness-verified join into one that's prohibitively slow or expensive to actually run — so the thing I'd add before trusting this at warehouse scale isn't a correctness re-verification, it's a query-performance and cost validation against realistic data volumes.</p>
+    </div>
+
     <div class="footer-nav">
       <a href="index.html">← back to all flowcharts</a>
       <a href="https://github.com/abhi32dev/ai-infrastructure-platform-2/tree/main/21-feature-store" target="_blank" rel="noopener">21-feature-store source ↗</a>
